@@ -43,13 +43,19 @@ export default function DocxPreview({ blob, onError }: Props) {
   return (
     <div
       style={{
-        background: '#f5f5f5',
-        padding: 8,
-        borderRadius: 4,
+        background: '#f0f2f5',
+        padding: 12,
+        borderRadius: 8,
+        border: '1px solid #e5e7eb',
         maxHeight: '55vh',
         overflow: 'auto',
       }}
     >
+      {!blob && (
+        <div style={{ textAlign: 'center', color: '#9ca3af', padding: '48px 0', fontSize: 13 }}>
+          选择模板后在此预览打印效果
+        </div>
+      )}
       <div ref={containerRef} />
     </div>
   );

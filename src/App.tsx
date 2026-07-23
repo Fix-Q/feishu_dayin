@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ConfigProvider, Tabs, Spin, Alert, message } from 'antd';
+import { ConfigProvider, Tabs, Spin, Alert, theme } from 'antd';
+import { PrinterOutlined, FolderOpenOutlined, TagsOutlined } from '@ant-design/icons';
 import zhCN from 'antd/locale/zh_CN';
 import 'antd/dist/reset.css';
 
@@ -9,6 +10,15 @@ import { useActiveRecord } from './hooks/useActiveRecord';
 import PrintTab from './components/PrintTab';
 import TemplateManageTab from './components/TemplateManageTab';
 import VariablePanel from './components/VariablePanel';
+
+// 主题色：贴合品牌的克制蓝绿，统一圆角与控件密度
+const THEME = {
+  token: {
+    colorPrimary: '#2b7a78',
+    borderRadius: 8,
+    colorBgLayout: '#f5f6f8',
+  },
+};
 
 export default function App() {
   const active = useActiveRecord();
@@ -28,7 +38,7 @@ export default function App() {
       setTemplates(list);
       setLoadError(null);
     } catch (e: any) {
-      setLoadError('无法加载模板列表：' + (e?.message || e));
+      setLoadError('无法连接本地模板服务：' + (e?.message || e));
     }
   }, [active.tableId]);
 
@@ -53,7 +63,7 @@ export default function App() {
   const items = [
     {
       key: 'print',
-      label: '打印',
+      label: (<span><PrinterOutlined /> 打印</span>),
       children: (
         <PrintTab
           active={active}
@@ -66,7 +76,7 @@ export default function App() {
     },
     {
       key: 'manage',
-      label: '模板管理',
+      label: (<span><FolderOpenOutlined /> 模板管理</span>),
       children: (
         <TemplateManageTab
           active={active}
@@ -79,30 +89,44 @@ export default function App() {
     },
     {
       key: 'vars',
-      label: '变量参考',
+      label: (<span><TagsOutlined /> 变量参考</span>),
       children: <VariablePanel active={active} />,
     },
   ];
 
   return (
-    <ConfigProvider locale={zhCN}>
-      <div style={{ padding: 12, height: '100vh', boxSizing: 'border-box', overflow: 'auto' }}>
+    <ConfigProvider locale={zhCN} theme={THEME}>
+      <div
+        style={{
+          height: '100vh',
+          boxSizing: 'border-box',
+          overflow: 'auto',
+          background: THEME.token.colorBgLayout,
+          padding: 16,
+        }}
+      >
         {loadError && (
           <Alert
             type="warning"
             showIcon
-            style={{ marginBottom: 12 }}
+            style={{ marginBottom: 16, borderRadius: 8 }}
             message={loadError}
             description="模板功能依赖本地 dev server 的 /api 接口，请确认服务已启动。"
           />
         )}
         {active.loading ? (
-          <div style={{ textAlign: 'center', paddingTop: 80 }}>
-            <Spin />
-            <div style={{ marginTop: 12, color: '#888' }}>正在连接多维表格…</div>
+          <div style={{ textAlign: 'center', paddingTop: 96 }}>
+            <Spin size="large" />
+            <div style={{ marginTop: 16, color: '#8c8c8c', fontSize: 13 }}>正在连接多维表格…</div>
           </div>
         ) : (
-          <Tabs activeKey={activeKey} onChange={setActiveKey} items={items} />
+          <Tabs
+            activeKey={activeKey}
+            onChange={setActiveKey}
+            items={items}
+            size="large"
+            tabBarStyle={{ marginBottom: 16, fontWeight: 500 }}
+          />
         )}
       </div>
     </ConfigProvider>

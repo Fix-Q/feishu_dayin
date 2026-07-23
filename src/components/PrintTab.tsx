@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Select, Space, Spin, Tag, Typography, message } from 'antd';
-import { PrinterOutlined, DownloadOutlined, ReloadOutlined } from '@ant-design/icons';
+import { Alert, Button, Card, Select, Space, Spin, Tag, Typography, message } from 'antd';
+import { PrinterOutlined, DownloadOutlined, ReloadOutlined, FileWordOutlined } from '@ant-design/icons';
 import { saveAs } from 'file-saver';
 
 import type { TemplateInfo, MatchConfig, MatchKind } from '../types';
@@ -141,23 +141,23 @@ export default function PrintTab({ active, templates, matchConfig, onNeedTemplat
   const noRecord = !active.recordId;
 
   return (
-    <Space direction="vertical" size={12} style={{ width: '100%' }}>
+    <Space direction="vertical" size={16} style={{ width: '100%' }}>
       {active.error && <Alert type="error" showIcon message={`连接多维表格出错：${active.error}`} />}
 
       <Alert
-        type={noRecord ? 'warning' : 'info'}
+        type={noRecord ? 'warning' : 'success'}
         showIcon
         message={
           noRecord
             ? '请在左侧表格中选中一条记录'
-            : <span>当前记录：<Text strong>{active.primaryText || '(空)'}</Text>　表：{active.tableName}</span>
+            : <span>当前记录：<Text strong>{active.primaryText || '(空)'}</Text>　·　表：{active.tableName}</span>
         }
       />
 
-      <div>
+      <Card size="small" title="选择模板" styles={{ body: { paddingBottom: 12 } }}>
         <Space wrap>
           <Select
-            style={{ width: 260 }}
+            style={{ width: 280 }}
             placeholder={templates.length ? '选择模板' : '暂无模板，请先在“模板管理”上传'}
             showSearch
             allowClear
@@ -165,9 +165,7 @@ export default function PrintTab({ active, templates, matchConfig, onNeedTemplat
             onChange={(v) => { setSelected(v ?? null); setManual(true); }}
             options={templateOptions}
             optionFilterProp="label"
-            notFoundContent={
-              <a onClick={goManage}>去模板管理上传</a>
-            }
+            notFoundContent={<a onClick={goManage}>去模板管理上传</a>}
           />
           {selected && !manual && matchKind !== 'none' && (
             <Tag color="green">{KIND_LABEL[matchKind]}</Tag>
@@ -178,25 +176,26 @@ export default function PrintTab({ active, templates, matchConfig, onNeedTemplat
           )}
         </Space>
         {!matchFieldId && (
-          <div style={{ marginTop: 6 }}>
+          <div style={{ marginTop: 8 }}>
             <Text type="secondary" style={{ fontSize: 12 }}>
               未设置自动匹配字段，<a onClick={goManage}>去设置</a>后可按记录自动选模板。
             </Text>
           </div>
         )}
-      </div>
-
-      <Space>
-        <Button type="primary" icon={<PrinterOutlined />} onClick={handlePrint} disabled={!selected || noRecord}>
-          打印
-        </Button>
-        <Button icon={<DownloadOutlined />} onClick={handleDownload} disabled={!selected || noRecord}>
-          下载 Word
-        </Button>
-        <Button icon={<ReloadOutlined />} onClick={generate} disabled={!selected || noRecord}>
-          刷新预览
-        </Button>
-      </Space>
+        <div style={{ marginTop: 14 }}>
+          <Space wrap>
+            <Button type="primary" icon={<PrinterOutlined />} onClick={handlePrint} disabled={!selected || noRecord}>
+              打印
+            </Button>
+            <Button icon={<DownloadOutlined />} onClick={handleDownload} disabled={!selected || noRecord}>
+              下载 Word
+            </Button>
+            <Button type="text" icon={<ReloadOutlined />} onClick={generate} disabled={!selected || noRecord}>
+              刷新预览
+            </Button>
+          </Space>
+        </div>
+      </Card>
 
       {errors.length > 0 && (
         <Alert
@@ -215,9 +214,15 @@ export default function PrintTab({ active, templates, matchConfig, onNeedTemplat
         />
       )}
 
-      <Spin spinning={rendering} tip="正在生成预览…">
-        <DocxPreview blob={previewBlob} onError={(m) => setErrors([m])} />
-      </Spin>
+      <Card
+        size="small"
+        title={<span><FileWordOutlined /> 打印预览</span>}
+        styles={{ body: { padding: 12 } }}
+      >
+        <Spin spinning={rendering} tip="正在生成预览…">
+          <DocxPreview blob={previewBlob} onError={(m) => setErrors([m])} />
+        </Spin>
+      </Card>
     </Space>
   );
 }
