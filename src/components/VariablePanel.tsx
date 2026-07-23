@@ -1,9 +1,10 @@
-import React, { useMemo, useState } from 'react';
-import { Alert, Button, Card, Collapse, Space, Tag, Typography, message } from 'antd';
+import React, { useMemo, useRef, useState } from 'react';
+import { Alert, Button, Card, Collapse, Input, Space, Switch, Tag, Typography, message } from 'antd';
 import { CopyOutlined } from '@ant-design/icons';
 import { bitable, FieldType } from '@lark-base-open/js-sdk';
 import type { FieldMetaLite } from '../types';
 import type { ActiveRecordState } from '../hooks/useActiveRecord';
+import { orderFields } from '../utils/fieldOrder';
 
 const { Text, Paragraph } = Typography;
 
@@ -45,26 +46,51 @@ export default function VariablePanel({ active }: Props) {
   // 关联字段的子表字段缓存：{ [fieldId]: 子字段名[] }
   const [childFields, setChildFields] = useState<Record<string, string[]>>({});
   const [loadingChild, setLoadingChild] = useState<Record<string, boolean>>({});
+  const childFieldsRef = useRef<Record<string, string[]>>({});
+  const [keyword, setKeyword] = useState('');
+  const [showHidden, setShowHidden] = useState(false);
 
-  const normalFields = useMemo(
-    () => active.fieldMetas.filter((f) => LINK_TYPES.indexOf(f.type) === -1),
-    [active.fieldMetas]
+  const ordered = useMemo(
+    () => orderFields(active.fieldMetas, active.visibleFieldIds),
+    [active.fieldMetas, active.visibleFieldIds]
+  );
+  const kw = keyword.trim().toLowerCase();
+  const kwMatch = (name: string) => !kw || name.toLowerCase().includes(kw);
+  const visibleNormal = useMemo(
+    () => ordered.visible.filter((f) => LINK_TYPES.indexOf(f.type) === -1 && kwMatch(f.name)),
+    [ordered, kw]
+  );
+  const hiddenNormal = useMemo(
+    () => ordered.hidden.filter((f) => LINK_TYPES.indexOf(f.type) === -1 && kwMatch(f.name)),
+    [ordered, kw]
   );
   const linkFields = useMemo(
-    () => active.fieldMetas.filter((f) => LINK_TYPES.indexOf(f.type) !== -1),
-    [active.fieldMetas]
+    () => ordered.visible.concat(ordered.hidden).filter((f) => LINK_TYPES.indexOf(f.type) !== -1 && kwMatch(f.name)),
+    [ordered, kw]
   );
 
   const loadChildFields = async (meta: FieldMetaLite) => {
-    if (childFields[meta.id] || loadingChild[meta.id]) return;
+    if (childFieldsRef.current[meta.id] || loadingChild[meta.id]) return;
     const tableId = meta.property?.tableId;
     if (!tableId) return;
     setLoadingChild((s) => ({ ...s, [meta.id]: true }));
     try {
       const childTable = await bitable.base.getTableById(tableId);
       const metas = (await childTable.getFieldMetaList()) as unknown as FieldMetaLite[];
-      setChildFields((s) => ({ ...s, [meta.id]: metas.map((m) => m.name) }));
+      let names = metas.map((m) => m.name);
+      try {
+        const view = await childTable.getActiveView();
+        const vids = await view.getVisibleFieldIdList();
+        if (Array.isArray(vids) && vids.length) {
+          const order = new Map(metas.map((m) => [m.id, m.name] as const));
+          const orderedNames = vids.map((id: string) => order.get(id)).filter(Boolean) as string[];
+          if (orderedNames.length) names = orderedNames;
+        }
+      } catch (e) { /* 退回原序 */ }
+      childFieldsRef.current[meta.id] = names;
+      setChildFields((s) => ({ ...s, [meta.id]: names }));
     } catch (e) {
+      childFieldsRef.current[meta.id] = [];
       setChildFields((s) => ({ ...s, [meta.id]: [] }));
     } finally {
       setLoadingChild((s) => ({ ...s, [meta.id]: false }));
@@ -79,17 +105,19 @@ export default function VariablePanel({ active }: Props) {
   };
 
   // 复制全部变量（多行文本，粘进 Word 即为起始模板）
-  const copyAll = () => {
+  const copyAll = async () => {
+    // 预加载所有关联字段子表（A5）
+    await Promise.all(linkFields.map((f) => loadChildFields(f)));
     const lines: string[] = [];
     lines.push('=== 系统变量 ===');
     SYSTEM_VARS.forEach((v) => lines.push(`{${v}}`));
     lines.push('');
     lines.push('=== 字段变量 ===');
-    normalFields.forEach((f) => lines.push(`{${f.name}}`));
+    visibleNormal.concat(showHidden ? hiddenNormal : []).forEach((f) => lines.push(`{${f.name}}`));
     linkFields.forEach((f) => {
       lines.push('');
       lines.push(`=== 关联字段「${f.name}」循环（放进表格同一行）===`);
-      const subs = childFields[f.id] || ['(展开该字段以加载子字段)'];
+      const subs = childFieldsRef.current[f.id] || ['(子字段未加载)'];
       lines.push(loopSnippet(f.name, subs));
       lines.push(`整段文本：{${f.name}_文本}`);
     });
@@ -140,20 +168,42 @@ export default function VariablePanel({ active }: Props) {
 
       <Button icon={<CopyOutlined />} onClick={copyAll} block>复制全部变量</Button>
 
+      <Space style={{ width: '100%' }} direction="vertical" size={8}>
+        <Input.Search placeholder="搜索变量名" allowClear value={keyword} onChange={(e) => setKeyword(e.target.value)} />
+        <div><Switch size="small" checked={showHidden} onChange={setShowHidden} /> <Text type="secondary" style={{ fontSize: 12 }}>显示隐藏字段</Text></div>
+      </Space>
+
       <Card size="small" title="系统变量">
         {SYSTEM_VARS.map((v) => <VarRow key={v} tag={`{${v}}`} />)}
       </Card>
 
-      <Card size="small" title={`字段变量（${normalFields.length}）`}>
-        {normalFields.length === 0 ? (
-          <Text type="secondary">当前表无普通字段</Text>
+      <Card size="small" title={`字段变量（${visibleNormal.length}${showHidden && hiddenNormal.length ? ` +${hiddenNormal.length}隐藏` : ''}）`}>
+        {visibleNormal.length === 0 && (!showHidden || hiddenNormal.length === 0) ? (
+          <Text type="secondary">{kw ? '无匹配字段' : '当前表无普通字段'}</Text>
         ) : (
-          normalFields.map((f) => <VarRow key={f.id} tag={`{${f.name}}`} />)
+          <>
+            {visibleNormal.map((f) => <VarRow key={f.id} tag={`{${f.name}}`} />)}
+            {showHidden && hiddenNormal.map((f) => (
+              <div key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <Tag color="default" style={{ fontSize: 11, margin: 0 }}>隐藏</Tag>
+                <div style={{ flex: 1 }}><VarRow tag={`{${f.name}}`} /></div>
+              </div>
+            ))}
+          </>
         )}
       </Card>
 
       {linkFields.length > 0 && (
         <Card size="small" title={`关联字段（${linkFields.length}）`}>
+          <div style={{ marginBottom: 8, fontSize: 12, color: '#888' }}>
+            循环标签要放在 Word 表格<strong>同一行</strong>：首格放 <Text code>{'{#字段}'}</Text>，末格放 <Text code>{'{/字段}'}</Text>。
+            <table style={{ borderCollapse: 'collapse', marginTop: 4 }}>
+              <tbody>
+                <tr><td style={{border:'1px solid #ddd',padding:'2px 6px'}}>序号</td><td style={{border:'1px solid #ddd',padding:'2px 6px'}}>名称</td><td style={{border:'1px solid #ddd',padding:'2px 6px'}}>数量</td></tr>
+                <tr><td style={{border:'1px solid #ddd',padding:'2px 6px',background:'#fffbe6'}}>{'{#明细}{序号}'}</td><td style={{border:'1px solid #ddd',padding:'2px 6px'}}>{'{名称}'}</td><td style={{border:'1px solid #ddd',padding:'2px 6px',background:'#fffbe6'}}>{'{数量}{/明细}'}</td></tr>
+              </tbody>
+            </table>
+          </div>
           <Collapse
             items={collapseItems}
             onChange={(keys) => {
