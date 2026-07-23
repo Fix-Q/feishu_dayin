@@ -8,6 +8,7 @@ export interface ActiveRecordState {
   tableId: string | null;
   tableName: string;
   fieldMetas: FieldMetaLite[];
+  visibleFieldIds: string[];
   recordId: string | null;
   primaryText: string; // 当前记录主字段的显示值
   error: string | null;
@@ -19,6 +20,7 @@ const EMPTY: ActiveRecordState = {
   tableId: null,
   tableName: '',
   fieldMetas: [],
+  visibleFieldIds: [],
   recordId: null,
   primaryText: '',
   error: null,
@@ -26,6 +28,18 @@ const EMPTY: ActiveRecordState = {
 
 // 封装当前激活表 + 选中记录，并订阅选择变化。
 // 切表时就地重载字段与记录（不再整页 reload）。
+
+// 获取视图可见字段列表
+async function getVisibleFieldIds(table: any): Promise<string[]> {
+  try {
+    const view = await table.getActiveView();
+    const ids = await view.getVisibleFieldIdList();
+    return Array.isArray(ids) ? ids.filter(Boolean) : [];
+  } catch (e) {
+    return []; // 取不到视图 → 空，上层视为全可见
+  }
+}
+
 export function useActiveRecord(): ActiveRecordState {
   const [state, setState] = useState<ActiveRecordState>(EMPTY);
   const tableIdRef = useRef<string | null>(null);
@@ -37,9 +51,10 @@ export function useActiveRecord(): ActiveRecordState {
     // 加载指定表的元信息（切表或首次）
     async function loadTable(tableId: string) {
       const table = await bitable.base.getTableById(tableId);
-      const [tableName, fieldMetas] = await Promise.all([
+      const [tableName, fieldMetas, visibleFieldIds] = await Promise.all([
         table.getName(),
         table.getFieldMetaList() as unknown as Promise<FieldMetaLite[]>,
+        getVisibleFieldIds(table),
       ]);
       if (disposed) return;
       tableIdRef.current = tableId;
@@ -50,6 +65,7 @@ export function useActiveRecord(): ActiveRecordState {
         tableId,
         tableName,
         fieldMetas,
+        visibleFieldIds,
         error: null,
       }));
     }
