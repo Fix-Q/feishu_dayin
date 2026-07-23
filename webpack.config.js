@@ -31,13 +31,24 @@ module.exports = {
     }),
   ],
   devServer: {
-    static: {
-      directory: path.join(__dirname, 'public'),
-    },
+    // 模板库以静态资源方式暴露，供前端 fetch(/templates/<名>.docx) 取源填充与下载。
+    // watch: false 是关键：否则上传模板会触发 live-reload，打断上传反馈与预览。
+    static: [
+      {
+        directory: path.join(__dirname, 'templates'),
+        publicPath: '/templates',
+        watch: false,
+      },
+    ],
     host: '0.0.0.0',
     port: Number(process.env.PORT) || 5173,
     open: false,
     hot: true,
-    historyApiFallback: true,
+    allowedHosts: 'all',
+    setupMiddlewares(middlewares, devServer) {
+      // 挂载模板/配置 API（devServer.app 即 express 实例）
+      require('./server/templateApi')(devServer.app);
+      return middlewares;
+    },
   },
 };

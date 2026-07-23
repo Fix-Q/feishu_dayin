@@ -1,0 +1,7 @@
+node_modules/
+dist/
+*.log
+
+# 保留模板库与匹配配置（本地部署直接调用）
+!templates/
+!templates/**
