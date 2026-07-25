@@ -69,16 +69,28 @@ module.exports = {
 EOF
 }
 
-# 从 cloudflared 日志提取穿透地址
+# 从 pm2 日志文件提取 cloudflared 穿透地址（兼容各版本 pm2）
 show_tunnel_url() {
   info "内网穿透地址："
-  local url
-  url=$(pm2 logs "$TUNNEL_NAME" --lines 100 --nostream --raw 2>/dev/null \
-        | grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' | tail -1 || true)
+  local url=""
+  local log_dir="$HOME/.pm2/logs"
+  # cloudflared 可能写 stdout 或 stderr，两个都读
+  if [[ -d "$log_dir" ]]; then
+    url=$(grep -oE 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' \
+          "$log_dir/${TUNNEL_NAME}-out.log" "$log_dir/${TUNNEL_NAME}-error.log" 2>/dev/null \
+          | tail -1 || true)
+  fi
+  if [[ -z "$url" ]]; then
+    # 备用：直接跑 pm2 logs（某些版本 --nostream 不支持）
+    url=$(pm2 logs "$TUNNEL_NAME" --lines 200 --raw 2>/dev/null \
+          | grep -oE 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' | tail -1 || true)
+  fi
   if [[ -n "$url" ]]; then
     ok "$url  ← 把这个填进飞书插件配置"
   else
-    warn "尚未获取到地址，cloudflared 可能还在启动中，几秒后重试：./deploy.sh status"
+    warn "尚未获取到地址，cloudflared 可能还在启动中"
+    info "手动查看日志：pm2 logs $TUNNEL_NAME --lines 50"
+    info "或：tail -n 50 ~/.pm2/logs/${TUNNEL_NAME}-out.log"
   fi
 }
 
