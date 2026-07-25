@@ -1,5 +1,15 @@
 #!/usr/bin/env bash
 # ============================================================
+# 自修复：若本脚本被 Windows 的 git autocrlf 在 Mac 上误写成 CRLF（行尾带 \r），
+# bash 会在 ANSI-C 颜色变量处报 "command not found"。这里先检测，若含 \r 则
+# 自动清洗成 LF 后重新执行本脚本，保证即便 git 配置没改对也能跑起来。
+if grep -q $'\r' "$0" 2>/dev/null; then
+  _clean="$(mktemp "${TMPDIR:-/tmp}deploy.XXXXXX.sh")"
+  sed 's/\r$//' "$0" > "$_clean"
+  chmod +x "$_clean"
+  exec "$_clean" "$@"
+fi
+# ============================================================
 # feishuprint 一键部署脚本（macOS 服务器长期挂机用）
 #
 # 依赖：Node.js 16+、npm、Homebrew
