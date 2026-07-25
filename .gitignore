@@ -9,3 +9,6 @@ dist/
 # 保留模板库与匹配配置（本地部署直接调用）
 !templates/
 !templates/**
+
+# pm2 进程配置（deploy.sh 按本地端口生成，不提交）
+ecosystem.config.cjs
