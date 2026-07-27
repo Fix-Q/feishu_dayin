@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { ConfigProvider, Tabs, Spin, Alert, theme } from 'antd';
-import { PrinterOutlined, FolderOpenOutlined, TagsOutlined } from '@ant-design/icons';
+import { PrinterOutlined, FolderOpenOutlined, TagsOutlined, FileTextOutlined } from '@ant-design/icons';
 import zhCN from 'antd/locale/zh_CN';
 import 'antd/dist/reset.css';
 
@@ -9,6 +9,7 @@ import { listTemplates, getConfig } from './services/templateApi';
 import { useActiveRecord } from './hooks/useActiveRecord';
 import PrintTab from './components/PrintTab';
 import TemplateManageTab from './components/TemplateManageTab';
+import TemplateEditorTab from './components/TemplateEditorTab';
 import VariablePanel from './components/VariablePanel';
 
 // 主题色：贴合品牌的克制蓝绿，统一圆角与控件密度
@@ -84,6 +85,17 @@ export default function App() {
           matchConfig={matchConfig}
           onTemplatesChanged={refreshTemplates}
           onConfigChanged={(cfg) => setMatchConfig(cfg)}
+        />
+      ),
+    },
+    {
+      key: 'edit',
+      label: (<span><FileTextOutlined /> 模板编辑</span>),
+      children: (
+        <TemplateEditorTab
+          active={active}
+          templates={templates}
+          onTemplatesChanged={refreshTemplates}
         />
       ),
     },

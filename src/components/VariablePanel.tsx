@@ -162,6 +162,9 @@ export default function VariablePanel({ active }: Props) {
             <p style={{ margin: '2px 0' }}>2. 关联字段用循环片段 <Text code>{'{#字段}…{/字段}'}</Text>，开始和结束标签要放在 Word 表格的同一行，每条关联记录会自动复制成一行。</p>
             <p style={{ margin: '2px 0' }}>3. 保存为 .docx，到「模板管理」上传。文件名（去掉 .docx）等于匹配字段的值时会自动匹配。</p>
             <p style={{ margin: '2px 0' }}>4. 附件字段只输出文件名，不插入图片。字段与系统变量重名时以真实字段为准。</p>
+            <p style={{ margin: '2px 0' }}>5. <strong>分页与求和</strong>：在模板正文任意处放一行指令（渲染时自动隐藏）：<br/>
+              <Text code>{'@@PAGE field=产品明细 size=5 sum=数量:合计数量,金额:合计金额 @@'}</Text><br/>
+              field=循环明细字段；size=每页行数；sum=需求和的数字列（col:输出变量，多个用逗号）。超量时自动拆成多页同格式出货单，并注入 <Text code>{'{合计数量}'}</Text>、<Text code>{'{页码}'}</Text>、<Text code>{'{总页数}'}</Text>。复制后的模板可在「模板编辑」里直接改这行参数。</p>
           </div>
         }
       />
