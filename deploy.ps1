@@ -93,7 +93,8 @@ function Do-Start {
   Write-Info "启动 dev server（端口 $PORT）..."
   pm2 start --name $APP_NAME --cwd "$APP_DIR" npm -- run start
   Write-Info "启动内网穿透..."
-  pm2 start --name $TUNNEL_NAME cloudflared -- tunnel --url "http://localhost:$PORT"
+  # 国内网络 QUIC(UDP) 常被限速/拦截，强制 http2(TCP 443) 更稳定
+  pm2 start --name $TUNNEL_NAME cloudflared -- tunnel --protocol http2 --edge-ip-version 4 --url "http://localhost:$PORT"
   pm2 save | Out-Null
   Write-Ok "服务已启动。稍候查看穿透地址："
   Start-Sleep -Seconds 3
