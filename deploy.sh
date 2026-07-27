@@ -1,15 +1,5 @@
 #!/usr/bin/env bash
 # ============================================================
-# 自修复：若本脚本被 Windows 的 git autocrlf 在 Mac 上误写成 CRLF（行尾带 \r），
-# bash 会在 ANSI-C 颜色变量处报 "command not found"。这里先检测，若含 \r 则
-# 自动清洗成 LF 后重新执行本脚本，保证即便 git 配置没改对也能跑起来。
-if grep -q $'\r' "$0" 2>/dev/null; then
-  _clean="$(mktemp "${TMPDIR:-/tmp}deploy.XXXXXX.sh")"
-  sed 's/\r$//' "$0" > "$_clean"
-  chmod +x "$_clean"
-  exec "$_clean" "$@"
-fi
-# ============================================================
 # feishuprint 一键部署脚本（macOS 服务器长期挂机用）
 #
 # 依赖：Node.js 16+、npm、Homebrew
@@ -27,7 +17,7 @@ fi
 #
 # 端口：默认 5173，可用 PORT=5199 ./deploy.sh start 自定义
 # ============================================================
-set -euo pipefail
+set -eo pipefail
 
 PORT="${PORT:-5173}"
 APP_NAME="feishuprint"
@@ -79,22 +69,28 @@ module.exports = {
 EOF
 }
 
-# 从 pm2 日志文件提取 cloudflared 穿透地址
+# 从 pm2 日志文件提取 cloudflared 穿透地址（兼容各版本 pm2）
 show_tunnel_url() {
   info "内网穿透地址："
   local url=""
   local log_dir="$HOME/.pm2/logs"
   # cloudflared 可能写 stdout 或 stderr，两个都读
   if [[ -d "$log_dir" ]]; then
-    url=$(grep -ohE 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' \
+    url=$(grep -oE 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' \
           "$log_dir/${TUNNEL_NAME}-out.log" "$log_dir/${TUNNEL_NAME}-error.log" 2>/dev/null \
           | tail -1 || true)
+  fi
+  if [[ -z "$url" ]]; then
+    # 备用：直接跑 pm2 logs（某些版本 --nostream 不支持）
+    url=$(pm2 logs "$TUNNEL_NAME" --lines 200 --raw 2>/dev/null \
+          | grep -oE 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' | tail -1 || true)
   fi
   if [[ -n "$url" ]]; then
     ok "$url  ← 把这个填进飞书插件配置"
   else
     warn "尚未获取到地址，cloudflared 可能还在启动中"
-    info "手动查看：tail -n 50 ~/.pm2/logs/${TUNNEL_NAME}-out.log"
+    info "手动查看日志：pm2 logs $TUNNEL_NAME --lines 50"
+    info "或：tail -n 50 ~/.pm2/logs/${TUNNEL_NAME}-out.log"
   fi
 }
 
@@ -249,3 +245,4 @@ case "${1:-help}" in
     sed -n '3,20p' "$0" | sed 's/^# \?//'
     ;;
 esac
+
