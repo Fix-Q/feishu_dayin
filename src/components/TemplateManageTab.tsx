@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import {
   Card, Input, List, Button, Upload, Space, Tag, Popconfirm, Modal, message, Select, Typography, Empty,
 } from 'antd';
-import { UploadOutlined, DeleteOutlined, CopyOutlined, DownloadOutlined } from '@ant-design/icons';
+import { UploadOutlined, DeleteOutlined, CopyOutlined, DownloadOutlined, FileWordOutlined, FileExcelOutlined } from '@ant-design/icons';
 import type { UploadProps } from 'antd';
 import type { TemplateInfo, MatchConfig } from '../types';
 import type { ActiveRecordState } from '../hooks/useActiveRecord';
@@ -77,7 +77,7 @@ export default function TemplateManageTab({
   };
 
   const uploadProps: UploadProps = {
-    accept: '.docx',
+    accept: '.docx,.xlsx',
     showUploadList: false,
     multiple: true,
     beforeUpload: (file) => {
@@ -85,8 +85,8 @@ export default function TemplateManageTab({
         message.error('未连接到数据表，无法上传');
         return Upload.LIST_IGNORE;
       }
-      if (!/\.docx$/i.test(file.name)) {
-        message.error('仅支持 .docx 文件');
+      if (!/\.(docx|xlsx)$/i.test(file.name)) {
+        message.error('仅支持 .docx / .xlsx 文件');
         return Upload.LIST_IGNORE;
       }
       if (file.size > 15 * 1024 * 1024) {
@@ -110,16 +110,18 @@ export default function TemplateManageTab({
 
   const openCopy = (name: string) => {
     setCopySource(name);
-    // 默认新名：原名 + " 副本"
-    const base = name.replace(/\.docx$/i, '');
-    setCopyTarget(`${base} 副本.docx`);
+    // 默认新名：原名 + " 副本"（保留原扩展名）
+    const ext = /\.xlsx$/i.test(name) ? '.xlsx' : '.docx';
+    const base = name.replace(/\.(docx|xlsx)$/i, '');
+    setCopyTarget(`${base} 副本${ext}`);
   };
 
   const handleCopy = async () => {
     if (!copySource) return;
     let target = copyTarget.trim();
     if (!target) { message.error('请输入新模板名称'); return; }
-    if (!/\.docx$/i.test(target)) target += '.docx';
+    const srcExt = /\.xlsx$/i.test(copySource) ? '.xlsx' : '.docx';
+    if (!/\.(docx|xlsx)$/i.test(target)) target += srcExt;
     if (!tableId) { message.error('未连接到数据表'); return; }
     const res = await copyTemplate(tableId, copySource, target);
     if (res.ok) {
@@ -219,8 +221,20 @@ export default function TemplateManageTab({
                 ]}
               >
                 <List.Item.Meta
-                  title={<Text ellipsis style={{ maxWidth: 220 }}>{t.name}</Text>}
-                  description={<Text type="secondary" style={{ fontSize: 12 }}>{formatSize(t.size)}</Text>}
+                  avatar={
+                    /\.xlsx$/i.test(t.name)
+                      ? <FileExcelOutlined style={{ fontSize: 20, color: '#1D7324' }} />
+                      : <FileWordOutlined style={{ fontSize: 20, color: '#2B579A' }} />
+                  }
+                  title={<Text ellipsis style={{ maxWidth: 200 }}>{t.name}</Text>}
+                  description={
+                    <Space size={6}>
+                      <Tag color={/\.xlsx$/i.test(t.name) ? 'green' : 'blue'} style={{ marginInlineEnd: 0 }}>
+                        {/\.xlsx$/i.test(t.name) ? 'Excel' : 'Word'}
+                      </Tag>
+                      <Text type="secondary" style={{ fontSize: 12 }}>{formatSize(t.size)}</Text>
+                    </Space>
+                  }
                 />
               </List.Item>
             )}
@@ -239,7 +253,7 @@ export default function TemplateManageTab({
         <Input
           value={copyTarget}
           onChange={(e) => setCopyTarget(e.target.value)}
-          placeholder="新模板名称（.docx）"
+          placeholder="新模板名称（.docx / .xlsx）"
           onPressEnter={handleCopy}
         />
       </Modal>

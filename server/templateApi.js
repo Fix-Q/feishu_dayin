@@ -52,13 +52,13 @@ function safeName(raw) {
     throw httpError(400, '文件名不能含路径分隔符');
   }
   name = path.basename(name); // 双保险：去掉任何残留路径成分
-  if (!/\.docx$/i.test(name)) throw httpError(400, '仅支持 .docx 文件');
+  if (!/\.(docx|xlsx)$/i.test(name)) throw httpError(400, '仅支持 .docx / .xlsx 文件');
   if (name.startsWith('_')) throw httpError(400, '文件名不能以下划线开头');
   if (name.startsWith('~$')) throw httpError(400, '非法的临时文件名');
   // 拒绝控制字符与 Windows 保留字符（basename 后不应再有 / \，双保险）
   if (/[<>:"/\|?*]/.test(name)) throw httpError(400, '文件名含非法字符');
   if (/[\x00-\x1f]/.test(name)) throw httpError(400, '文件名含控制字符');
-  if (name === '.docx') throw httpError(400, '文件名不能为空');
+  if (name === '.docx' || name === '.xlsx') throw httpError(400, '文件名不能为空');
   const full = path.resolve(TEMPLATES_DIR, name);
   if (path.dirname(full) !== TEMPLATES_DIR) throw httpError(400, '路径越界');
   return name;
@@ -83,7 +83,7 @@ module.exports = function attach(app) {
       const tableId = safeTableId(req.query.tableId);
       const dir = tableDir(tableId);
       const files = fs.readdirSync(dir)
-        .filter((f) => /\.docx$/i.test(f) && !f.startsWith('~$'))
+        .filter((f) => /\.(docx|xlsx)$/i.test(f) && !f.startsWith('~$'))
         .map((f) => {
           const st = fs.statSync(path.join(dir, f));
           return { name: f, size: st.size, mtime: st.mtimeMs };
@@ -102,7 +102,7 @@ module.exports = function attach(app) {
       const name = safeName(req.query.name);
       const buf = req.body;
       if (!Buffer.isBuffer(buf) || buf.length === 0) throw httpError(400, '上传内容为空');
-      if (buf[0] !== 0x50 || buf[1] !== 0x4b) throw httpError(400, '不是有效的 .docx 文件');
+      if (buf[0] !== 0x50 || buf[1] !== 0x4b) throw httpError(400, '不是有效的 Office 文件（docx/xlsx）');
       const full = path.join(tableDir(tableId), name);
       const overwrite = req.query.overwrite === '1';
       if (fs.existsSync(full) && !overwrite) {

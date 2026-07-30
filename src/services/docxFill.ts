@@ -2,6 +2,7 @@ import PizZip from 'pizzip';
 import Docxtemplater from 'docxtemplater';
 import type { PrintDataValue, LinkedRow } from '../types';
 import { extractParagraphs, setParagraphText, getBodyParts, PAGE_BREAK } from './docxText';
+import { amountToChinese } from './money';
 
 const MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
@@ -137,12 +138,18 @@ export function fillTemplate(
   const pages = chunkArray(rows, found.rule.size);
 
   const zips = pages.map((chunk, i) => {
+    const sums = computeSums(chunk, found.rule.sums);
+    const upper: Record<string, string> = {};
+    for (const [k, v] of Object.entries(sums)) {
+      if (/金额|总价|金额合计|合计金额/.test(k)) upper[`${k}大写`] = amountToChinese(v);
+    }
     const pageData: Record<string, PrintDataValue> = {
       ...data,
       [found.rule.field]: chunk,
       页码: i + 1,
       总页数: pages.length,
-      ...computeSums(chunk, found.rule.sums),
+      ...sums,
+      ...upper,
     };
     return renderToZip(new PizZip(cleanedBytes), pageData);
   });

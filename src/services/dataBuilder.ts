@@ -1,5 +1,6 @@
 import { bitable, FieldType } from '@lark-base-open/js-sdk';
 import type { FieldMetaLite, PrintDataResult, PrintDataValue, LinkedRow } from '../types';
+import { amountToChinese } from './money';
 
 const MAX_LINKED_RECORDS = 50; // 单个关联字段最多展开条数
 const CONCURRENCY = 10; // 关联记录读取并发上限
@@ -128,6 +129,24 @@ export async function buildPrintData(
       data[meta.name] = '';
     }
   });
+
+  // 派生变量：金额大写。
+  // 为每个名字里含“金额/合计金额/总价/总金额”的数值字段生成 “<字段名>大写”，
+  // 并额外提供通用别名 {金额大写}（取第一个可解析的金额字段）。
+  const moneyFieldNames = Object.keys(data).filter((k) =>
+    /金额|总价|总金额|应收|应付|价税合计/.test(k) && !/大写/.test(k)
+  );
+  let firstUpper = '';
+  for (const k of moneyFieldNames) {
+    const v = data[k];
+    if (Array.isArray(v)) continue;
+    const upper = amountToChinese(v);
+    if (upper) {
+      data[`${k}大写`] = upper;
+      if (!firstUpper) firstUpper = upper;
+    }
+  }
+  if (firstUpper && data['金额大写'] == null) data['金额大写'] = firstUpper;
 
   return { data, warnings };
 }

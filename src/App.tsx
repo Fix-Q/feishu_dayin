@@ -12,12 +12,20 @@ import TemplateManageTab from './components/TemplateManageTab';
 import TemplateEditorTab from './components/TemplateEditorTab';
 import VariablePanel from './components/VariablePanel';
 
-// 主题色：贴合品牌的克制蓝绿，统一圆角与控件密度
+// 主题：飞书风格。蓝色主色、克制圆角、紧凑控件、浅色卡片，贴近多维表格原生观感。
 const THEME = {
   token: {
-    colorPrimary: '#2b7a78',
-    borderRadius: 8,
-    colorBgLayout: '#f5f6f8',
+    colorPrimary: '#3370FF',      // 飞书蓝
+    colorInfo: '#3370FF',
+    borderRadius: 6,
+    colorBgLayout: '#f7f8fa',
+    colorBorderSecondary: '#eef0f3',
+    fontSize: 13,
+  },
+  components: {
+    Card: { headerFontSize: 14, paddingLG: 12 },
+    Tabs: { horizontalItemPadding: '8px 4px', titleFontSize: 14 },
+    Segmented: { itemSelectedBg: '#3370FF', itemSelectedColor: '#fff' },
   },
 };
 
@@ -112,34 +120,57 @@ export default function App() {
         style={{
           height: '100vh',
           boxSizing: 'border-box',
-          overflow: 'auto',
+          display: 'flex',
+          flexDirection: 'column',
           background: THEME.token.colorBgLayout,
-          padding: 16,
         }}
       >
-        {loadError && (
-          <Alert
-            type="warning"
-            showIcon
-            style={{ marginBottom: 16, borderRadius: 8 }}
-            message={loadError}
-            description="模板功能依赖本地 dev server 的 /api 接口，请确认服务已启动。"
-          />
-        )}
-        {active.loading ? (
-          <div style={{ textAlign: 'center', paddingTop: 96 }}>
-            <Spin size="large" />
-            <div style={{ marginTop: 16, color: '#8c8c8c', fontSize: 13 }}>正在连接多维表格…</div>
-          </div>
-        ) : (
-          <Tabs
-            activeKey={activeKey}
-            onChange={setActiveKey}
-            items={items}
-            size="large"
-            tabBarStyle={{ marginBottom: 16, fontWeight: 500 }}
-          />
-        )}
+        {/* 顶部品牌条 */}
+        <div
+          style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            padding: '10px 16px', background: '#fff',
+            borderBottom: '1px solid #eef0f3', flexShrink: 0,
+          }}
+        >
+          <span
+            style={{
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              width: 24, height: 24, borderRadius: 6, background: '#3370FF', color: '#fff',
+            }}
+          >
+            <PrinterOutlined style={{ fontSize: 14 }} />
+          </span>
+          <span style={{ fontWeight: 600, fontSize: 14, color: '#1f2329' }}>单据打印</span>
+          <span style={{ marginLeft: 'auto', fontSize: 12, color: '#8f959e' }}>
+            {active.tableName ? `表：${active.tableName}` : '未连接'}
+          </span>
+        </div>
+
+        <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
+          {loadError && (
+            <Alert
+              type="warning"
+              showIcon
+              style={{ marginBottom: 16, borderRadius: 8 }}
+              message={loadError}
+              description="模板功能依赖本地 dev server 的 /api 接口，请确认服务已启动。"
+            />
+          )}
+          {active.loading ? (
+            <div style={{ textAlign: 'center', paddingTop: 96 }}>
+              <Spin size="large" />
+              <div style={{ marginTop: 16, color: '#8c8c8c', fontSize: 13 }}>正在连接多维表格…</div>
+            </div>
+          ) : (
+            <Tabs
+              activeKey={activeKey}
+              onChange={setActiveKey}
+              items={items}
+              tabBarStyle={{ marginBottom: 16, fontWeight: 500 }}
+            />
+          )}
+        </div>
       </div>
     </ConfigProvider>
   );

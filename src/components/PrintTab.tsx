@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Card, Select, Space, Spin, Tag, Typography, message } from 'antd';
-import { PrinterOutlined, DownloadOutlined, ReloadOutlined, FileWordOutlined } from '@ant-design/icons';
+import { Alert, Button, Card, Segmented, Select, Space, Spin, Switch, Tag, Tooltip, Typography, message } from 'antd';
+import { PrinterOutlined, DownloadOutlined, ReloadOutlined, FileWordOutlined, RotateRightOutlined } from '@ant-design/icons';
 import { saveAs } from 'file-saver';
 
 import type { TemplateInfo, MatchConfig, MatchKind } from '../types';
@@ -8,9 +8,12 @@ import type { ActiveRecordState } from '../hooks/useActiveRecord';
 import { fetchTemplateBuffer } from '../services/templateApi';
 import { buildPrintData } from '../services/dataBuilder';
 import { fillTemplate, explainDocxError } from '../services/docxFill';
+import { fillXlsx, isXlsxName } from '../services/xlsxFill';
 import { matchTemplate } from '../services/templateMatch';
-import { printDocxBlob } from '../utils/print';
+import { printDocxBlob, printHtmlTable, printCopies, type PrintOrientation } from '../utils/print';
+import { renderXlsxToHtml } from '../services/xlsxRender';
 import DocxPreview from './DocxPreview';
+import XlsxPreview from './XlsxPreview';
 
 const { Text } = Typography;
 
@@ -34,6 +37,10 @@ export default function PrintTab({ active, templates, matchConfig, onNeedTemplat
   const [manual, setManual] = useState(false);
   const [matchKind, setMatchKind] = useState<MatchKind>('none');
   const [previewBlob, setPreviewBlob] = useState<Blob | null>(null);
+  const [orientation, setOrientation] = useState<PrintOrientation>('auto');
+  // 多联打印：默认关闭（单份）；开启后按联名列表连打
+  const [multiCopy, setMultiCopy] = useState(false);
+  const DEFAULT_COPIES = ['生产部', '销售部', '客户', '财务部', '开票'];
   const [rendering, setRendering] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
   const [warnings, setWarnings] = useState<string[]>([]);
@@ -93,7 +100,7 @@ export default function PrintTab({ active, templates, matchConfig, onNeedTemplat
         active.table, active.tableName, active.fieldMetas, active.recordId
       );
       setWarnings(w);
-      const blob = fillTemplate(buffer, data);
+      const blob = isXlsxName(selected) ? fillXlsx(buffer, data) : fillTemplate(buffer, data);
       setPreviewBlob(blob);
       return blob;
     } catch (e: any) {
@@ -115,11 +122,26 @@ export default function PrintTab({ active, templates, matchConfig, onNeedTemplat
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected, active.recordId]);
 
+  const isXlsx = !!selected && isXlsxName(selected);
+
   const handlePrint = async () => {
     const blob = previewBlob || (await generate());
     if (!blob) return;
     try {
-      await printDocxBlob(blob);
+      if (multiCopy) {
+        const html = isXlsx ? await renderXlsxToHtml(blob) : undefined;
+        await printCopies({
+          copies: DEFAULT_COPIES,
+          orientation,
+          docxBlob: isXlsx ? undefined : blob,
+          htmlTable: html,
+        });
+      } else if (isXlsx) {
+        const html = await renderXlsxToHtml(blob);
+        await printHtmlTable(html, orientation);
+      } else {
+        await printDocxBlob(blob, orientation);
+      }
     } catch (e: any) {
       message.error(e?.message || '打印失败');
     }
@@ -128,9 +150,10 @@ export default function PrintTab({ active, templates, matchConfig, onNeedTemplat
   const handleDownload = async () => {
     const blob = previewBlob || (await generate());
     if (!blob) return;
-    const base = selected ? selected.replace(/\.docx$/i, '') : '打印';
+    const ext = isXlsx ? '.xlsx' : '.docx';
+    const base = selected ? selected.replace(/\.(docx|xlsx)$/i, '') : '打印';
     const suffix = active.primaryText ? `-${active.primaryText}` : '';
-    saveAs(blob, `${base}${suffix}.docx`);
+    saveAs(blob, `${base}${suffix}${ext}`);
   };
 
   const templateOptions = useMemo(
@@ -183,17 +206,31 @@ export default function PrintTab({ active, templates, matchConfig, onNeedTemplat
           </div>
         )}
         <div style={{ marginTop: 14 }}>
-          <Space wrap>
-            <Button type="primary" icon={<PrinterOutlined />} onClick={handlePrint} disabled={!selected || noRecord}>
-              打印
-            </Button>
-            <Button icon={<DownloadOutlined />} onClick={handleDownload} disabled={!selected || noRecord}>
-              下载 Word
-            </Button>
-            <Button type="text" icon={<ReloadOutlined />} onClick={generate} disabled={!selected || noRecord}>
-              刷新预览
-            </Button>
-          </Space>
+          <div style={{ marginBottom: 10 }}>
+            <Space size={8} align="center">
+              <Tooltip title="五联货单等横向内容，若 Word 是竖版排版导致打印被裁切，选「横向」会自动旋转 90° 并切换横版纸张">
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  <RotateRightOutlined /> 打印方向
+                </Text>
+              </Tooltip>
+              <Segmented
+                size="small"
+                value={orientation}
+                onChange={(v) => setOrientation(v as PrintOrientation)}
+                options={[
+                  { label: '跟随文档', value: 'auto' },
+                  { label: '竖向', value: 'portrait' },
+                  { label: '横向', value: 'landscape' },
+                ]}
+              />
+              <Tooltip title="开启后一次连打 5 份（生产部/销售部/客户/财务部/开票），每份右上角标注联名">
+                <Space size={4} align="center">
+                  <Switch size="small" checked={multiCopy} onChange={setMultiCopy} />
+                  <Text type="secondary" style={{ fontSize: 12 }}>多联(5联)</Text>
+                </Space>
+              </Tooltip>
+            </Space>
+          </div>
         </div>
       </Card>
 
@@ -220,9 +257,32 @@ export default function PrintTab({ active, templates, matchConfig, onNeedTemplat
         styles={{ body: { padding: 12 } }}
       >
         <Spin spinning={rendering} tip="正在生成预览…">
-          <DocxPreview blob={previewBlob} onError={(m) => setErrors([m])} />
+          {isXlsx
+            ? <XlsxPreview blob={previewBlob} onError={(m) => setErrors([m])} />
+            : <DocxPreview blob={previewBlob} orientation={orientation} onError={(m) => setErrors([m])} />}
         </Spin>
       </Card>
+
+      {/* 底部固定操作栏：打印/下载常驻，不必滚到底 */}
+      <div
+        style={{
+          position: 'sticky', bottom: 0, margin: '4px -16px -16px',
+          padding: '10px 16px', background: '#fff',
+          borderTop: '1px solid #eef0f3',
+          display: 'flex', gap: 8, alignItems: 'center',
+          boxShadow: '0 -2px 8px rgba(0,0,0,0.03)',
+        }}
+      >
+        <Button type="primary" icon={<PrinterOutlined />} onClick={handlePrint} disabled={!selected || noRecord}>
+          {multiCopy ? '打印(5联)' : '打印'}
+        </Button>
+        <Button icon={<DownloadOutlined />} onClick={handleDownload} disabled={!selected || noRecord}>
+          {isXlsx ? '下载 Excel' : '下载 Word'}
+        </Button>
+        <Button type="text" icon={<ReloadOutlined />} onClick={generate} disabled={!selected || noRecord} style={{ marginLeft: 'auto' }}>
+          刷新预览
+        </Button>
+      </div>
     </Space>
   );
 }
