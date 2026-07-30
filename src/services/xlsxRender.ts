@@ -127,7 +127,7 @@ export async function renderXlsxToHtml(blob: Blob): Promise<string> {
         if (cs > 1) attrs.push(`colspan="${cs}"`);
         if (rs > 1) attrs.push(`rowspan="${rs}"`);
       }
-      const styles: string[] = ['padding:1px 3px', 'overflow:hidden', 'word-break:break-all'];
+      const styles: string[] = ['padding:2px 4px', 'overflow:hidden'];
       // 边框
       const bd = cell.border || {};
       styles.push(`border-top:${borderStyle(bd.top) || '0'}`);
@@ -150,7 +150,11 @@ export async function renderXlsxToHtml(blob: Blob): Promise<string> {
       const ha = al.horizontal || (typeof cell.value === 'number' ? 'right' : 'left');
       styles.push(`text-align:${ha}`);
       styles.push(`vertical-align:${al.vertical || 'middle'}`);
-      if (al.wrapText) styles.push('white-space:pre-wrap');
+      if (al.wrapText) {
+        styles.push('white-space:pre-wrap;word-break:break-all');
+      } else {
+        styles.push('white-space:nowrap');
+      }
 
       html += `<td ${attrs.join(' ')} style="${styles.join(';')}">${esc(cellText(cell))}</td>`;
     }

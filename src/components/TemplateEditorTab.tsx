@@ -5,6 +5,7 @@ import type { TemplateInfo } from '../types';
 import type { ActiveRecordState } from '../hooks/useActiveRecord';
 import { fetchTemplateBuffer, uploadTemplate } from '../services/templateApi';
 import { listTemplateParagraphs, applyParagraphEdits } from '../services/docxText';
+import { isXlsxName } from '../services/xlsxFill';
 import type { ParagraphInfo } from '../services/docxText';
 
 const { Text } = Typography;
@@ -27,9 +28,10 @@ export default function TemplateEditorTab({ active, templates, onTemplatesChange
 
   const tableId = active.tableId;
 
-  // 选中模板后自动加载段落
+  // 选中模板后自动加载段落（仅支持 .docx）
+  const isXlsx = !!selected && isXlsxName(selected);
   useEffect(() => {
-    if (!selected || !tableId) {
+    if (!selected || !tableId || isXlsx) {
       setParas([]);
       setTexts([]);
       setOriginal([]);
@@ -57,7 +59,7 @@ export default function TemplateEditorTab({ active, templates, onTemplatesChange
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected, tableId]);
+  }, [selected, tableId, isXlsx]);
 
   const changedCount = texts.filter((t, i) => t !== original[i]).length;
 
@@ -119,7 +121,7 @@ export default function TemplateEditorTab({ active, templates, onTemplatesChange
             options={templateOptions}
             optionFilterProp="label"
           />
-          {selected && (
+          {selected && !isXlsx && (
             <>
               <Button icon={<SaveOutlined />} type="primary" loading={saving} onClick={handleSave} disabled={changedCount === 0}>
                 保存{changedCount > 0 ? `（${changedCount} 处）` : ''}
@@ -136,11 +138,25 @@ export default function TemplateEditorTab({ active, templates, onTemplatesChange
         <Empty description="请选择上方模板开始编辑" />
       )}
 
-      {selected && loading && (
+      {isXlsx && (
+        <Alert
+          type="warning"
+          showIcon
+          message="Excel 模板暂不支持在线编辑"
+          description={
+            <div style={{ fontSize: 12 }}>
+              <p style={{ margin: '2px 0' }}>当前选中的是 <b>.xlsx</b> 格式模板，在线编辑功能仅支持 Word（.docx）模板。</p>
+              <p style={{ margin: '2px 0' }}>如需修改 Excel 模板，请到「打印」页下载 .xlsx 文件，用 Excel 修改后重新上传。</p>
+            </div>
+          }
+        />
+      )}
+
+      {selected && !isXlsx && loading && (
         <div style={{ textAlign: 'center', padding: 32 }}><Spin /></div>
       )}
 
-      {selected && !loading && (
+      {selected && !isXlsx && !loading && (
         <Card size="small" title={<span><FileTextOutlined /> 段落（共 {paras.length} 个，可编辑）</span>}>
           <div style={{ maxHeight: '56vh', overflow: 'auto', paddingRight: 4 }}>
             {paras.map((p, i) => {
