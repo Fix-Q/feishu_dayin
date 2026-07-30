@@ -1,6 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Select, Spin, Tag, Tooltip, Typography, message } from 'antd';
-import { PrinterOutlined, DownloadOutlined, ReloadOutlined, RotateRightOutlined } from '@ant-design/icons';
+import { Alert, Button, Select, Slider, Space, Spin, Tag, Tooltip, Typography, message } from 'antd';
+import {
+  PrinterOutlined, DownloadOutlined, ReloadOutlined, RotateRightOutlined,
+  ZoomInOutlined, ZoomOutOutlined, ColumnWidthOutlined,
+} from '@ant-design/icons';
 import { saveAs } from 'file-saver';
 
 import type { TemplateInfo, MatchConfig, MatchKind } from '../types';
@@ -12,7 +15,9 @@ import { fillXlsx, isXlsxName } from '../services/xlsxFill';
 import { matchTemplate } from '../services/templateMatch';
 import { printDocxBlob, printHtmlTable, printCopies, type PrintOrientation } from '../utils/print';
 import { renderXlsxToHtml } from '../services/xlsxRender';
-import DocxPreview from './DocxPreview';
+import DocxPreview, {
+  MIN_SCALE, MAX_SCALE, SCALE_STEP, clampScale, type PreviewHandle,
+} from './DocxPreview';
 import XlsxPreview from './XlsxPreview';
 
 const { Text } = Typography;
@@ -55,7 +60,14 @@ export default function PrintTab({ active, templates, matchConfig, onNeedTemplat
   const [rendering, setRendering] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
   const [warnings, setWarnings] = useState<string[]>([]);
+  const [scale, setScale] = useState(1);
+  const previewRef = useRef<PreviewHandle>(null);
   const debounceRef = useRef<any>(null);
+
+  const handleScaleChange = useCallback((s: number) => setScale(clampScale(s)), []);
+  const zoomIn = () => setScale((s) => clampScale(s + SCALE_STEP));
+  const zoomOut = () => setScale((s) => clampScale(s - SCALE_STEP));
+  const fitWidth = () => previewRef.current?.fitWidth();
 
   const matchFieldId = active.tableId ? matchConfig.tables[active.tableId]?.matchFieldId : undefined;
 
@@ -241,6 +253,29 @@ export default function PrintTab({ active, templates, matchConfig, onNeedTemplat
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px', borderBottom: '1px solid #e5e6eb', background: '#fafbfc', flexShrink: 0 }}>
             <span style={{ fontSize: 13, fontWeight: 600, color: '#1f2329', marginRight: 'auto' }}>打印预览</span>
 
+            {/* 缩放控件：放在预览面板外，不会被 zoom 影响 */}
+            <Space size={2}>
+              <Tooltip title="缩小 (Ctrl+滚轮)">
+                <Button size="small" icon={<ZoomOutOutlined />} onClick={zoomOut} disabled={!previewBlob || scale <= MIN_SCALE} />
+              </Tooltip>
+              <Tooltip title="放大 (Ctrl+滚轮)">
+                <Button size="small" icon={<ZoomInOutlined />} onClick={zoomIn} disabled={!previewBlob || scale >= MAX_SCALE} />
+              </Tooltip>
+              <Tooltip title="适应宽度">
+                <Button size="small" icon={<ColumnWidthOutlined />} onClick={fitWidth} disabled={!previewBlob} />
+              </Tooltip>
+            </Space>
+            <div style={{ width: 90 }}>
+              <Slider
+                min={MIN_SCALE} max={MAX_SCALE} step={SCALE_STEP}
+                value={scale} onChange={(v) => setScale(clampScale(v as number))}
+                disabled={!previewBlob} tooltip={{ open: false }}
+              />
+            </div>
+            <span style={{ fontSize: 12, color: '#6b7280', minWidth: 38, textAlign: 'right' }}>{Math.round(scale * 100)}%</span>
+
+            <div style={{ width: 1, height: 16, background: '#e5e6eb', margin: '0 4px' }} />
+
             <Tooltip title="刷新预览">
               <Button
                 size="small"
@@ -274,11 +309,11 @@ export default function PrintTab({ active, templates, matchConfig, onNeedTemplat
           </div>
 
           {/* Preview body */}
-          <div style={{ flex: 1, background: '#eceef1', overflow: 'auto', display: 'flex', justifyContent: 'center', padding: 16 }}>
-            <Spin spinning={rendering} tip="正在生成预览…">
+          <div style={{ flex: 1, background: '#eceef1', overflow: 'hidden', padding: 16, display: 'flex' }}>
+            <Spin spinning={rendering} tip="正在生成预览…" wrapperClassName="preview-spin" style={{ width: '100%' }}>
               {isXlsx
-                ? <XlsxPreview blob={previewBlob} onError={(m) => setErrors([m])} />
-                : <DocxPreview blob={previewBlob} orientation={orientation} onError={(m) => setErrors([m])} />}
+                ? <XlsxPreview ref={previewRef} blob={previewBlob} scale={scale} onScaleChange={handleScaleChange} onError={(m) => setErrors([m])} />
+                : <DocxPreview ref={previewRef} blob={previewBlob} orientation={orientation} scale={scale} onScaleChange={handleScaleChange} onError={(m) => setErrors([m])} />}
             </Spin>
           </div>
         </div>

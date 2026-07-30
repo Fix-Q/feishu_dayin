@@ -10,6 +10,13 @@ try {
   // 忽略隐私模式等无法访问 localStorage 的情况
 }
 
+// 让预览区的 Spin 包裹容器撑满高度，使预览滚动区正确占满剩余空间
+const style = document.createElement('style');
+style.textContent = `
+.preview-spin, .preview-spin .ant-spin-container { width: 100%; height: 100%; }
+`;
+document.head.appendChild(style);
+
 const container = document.getElementById('root');
 if (container) {
   createRoot(container).render(<App />);

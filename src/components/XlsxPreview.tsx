@@ -1,29 +1,21 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { Space, Button, Tooltip, Slider } from 'antd';
-import {
-  ZoomInOutlined, ZoomOutOutlined, ColumnWidthOutlined, RedoOutlined,
-} from '@ant-design/icons';
+import React, { useEffect, useRef, useState, useCallback, forwardRef, useImperativeHandle } from 'react';
 import { renderXlsxToHtml } from '../services/xlsxRender';
+import { clampScale, SCALE_STEP, type PreviewHandle } from './DocxPreview';
 
 interface Props {
   blob: Blob | null;
+  scale: number;
+  onScaleChange: (s: number) => void;
   onError?: (msg: string) => void;
 }
 
-const MIN_SCALE = 0.5;
-const MAX_SCALE = 2.5;
-const STEP = 0.1;
-
-function clamp(v: number): number {
-  return Math.min(MAX_SCALE, Math.max(MIN_SCALE, Math.round(v * 100) / 100));
-}
-
 // xlsx 保真预览：用 exceljs 读取单元格值+样式，渲染成 HTML 表格。
-// 与 DocxPreview 一致的缩放工具条（放大/缩小/适应宽度/重置/Ctrl滚轮）。
-export default function XlsxPreview({ blob, onError }: Props) {
+// 缩放状态由父组件控制，工具条放在预览面板外，避免工具条被一起缩放。
+const XlsxPreview = forwardRef<PreviewHandle, Props>(function XlsxPreview(
+  { blob, scale, onScaleChange, onError }, ref
+) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [scale, setScale] = useState(1);
   const [hasContent, setHasContent] = useState(false);
 
   const fitWidth = useCallback(() => {
@@ -35,8 +27,10 @@ export default function XlsxPreview({ blob, onError }: Props) {
     const pageW = table.offsetWidth;
     if (!pageW) return;
     const avail = scroll.clientWidth - 24;
-    setScale(clamp(avail / pageW));
-  }, []);
+    onScaleChange(clampScale(avail / pageW));
+  }, [onScaleChange]);
+
+  useImperativeHandle(ref, () => ({ fitWidth }), [fitWidth]);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -57,47 +51,30 @@ export default function XlsxPreview({ blob, onError }: Props) {
     return () => { cancelled = true; };
   }, [blob, onError, fitWidth]);
 
-  const zoomIn = () => setScale((s) => clamp(s + STEP));
-  const zoomOut = () => setScale((s) => clamp(s - STEP));
-  const reset = () => setScale(1);
-
   const onWheel = useCallback((e: React.WheelEvent) => {
     if (!(e.ctrlKey || e.metaKey)) return;
     e.preventDefault();
-    setScale((s) => clamp(s + (e.deltaY < 0 ? STEP : -STEP)));
-  }, []);
+    onScaleChange(clampScale(scale + (e.deltaY < 0 ? SCALE_STEP : -SCALE_STEP)));
+  }, [scale, onScaleChange]);
 
   return (
-    <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden' }}>
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 8,
-        padding: '6px 10px', background: '#fafafa', borderBottom: '1px solid #eef0f2',
-      }}>
-        <Space size={4}>
-          <Tooltip title="缩小 (Ctrl+滚轮)"><Button size="small" icon={<ZoomOutOutlined />} onClick={zoomOut} disabled={!hasContent || scale <= MIN_SCALE} /></Tooltip>
-          <Tooltip title="放大 (Ctrl+滚轮)"><Button size="small" icon={<ZoomInOutlined />} onClick={zoomIn} disabled={!hasContent || scale >= MAX_SCALE} /></Tooltip>
-          <Tooltip title="适应宽度"><Button size="small" icon={<ColumnWidthOutlined />} onClick={fitWidth} disabled={!hasContent} /></Tooltip>
-          <Tooltip title="重置 100%"><Button size="small" icon={<RedoOutlined />} onClick={reset} disabled={!hasContent} /></Tooltip>
-        </Space>
-        <div style={{ width: 120, marginLeft: 4 }}>
-          <Slider min={MIN_SCALE} max={MAX_SCALE} step={STEP} value={scale} onChange={(v) => setScale(clamp(v as number))} disabled={!hasContent} tooltip={{ open: false }} />
+    <div
+      ref={scrollRef}
+      onWheel={onWheel}
+      style={{ width: '100%', height: '100%', overflow: 'auto', display: 'flex', justifyContent: 'center' }}
+    >
+      {!blob && (
+        <div style={{ textAlign: 'center', color: '#9ca3af', padding: '48px 0', fontSize: 13 }}>
+          选择 Excel 模板后在此预览打印效果
         </div>
-        <span style={{ fontSize: 12, color: '#6b7280', minWidth: 42, textAlign: 'right' }}>{Math.round(scale * 100)}%</span>
-      </div>
-
-      <div ref={scrollRef} onWheel={onWheel} style={{ background: '#f0f2f5', padding: 12, maxHeight: '55vh', overflow: 'auto' }}>
-        {!blob && (
-          <div style={{ textAlign: 'center', color: '#9ca3af', padding: '48px 0', fontSize: 13 }}>
-            选择 Excel 模板后在此预览打印效果
-          </div>
-        )}
-        <div ref={containerRef} style={{
-          // CSS zoom 才会真正改变 layout box，水平滚动条才能正确计算滚动范围
-          // transform: scale 不会改变 layout，滚动条会按缩放前宽度算，位置会错位
-          zoom: scale,
-          display: 'inline-block',
-        }} />
-      </div>
+      )}
+      <div ref={containerRef} style={{
+        // CSS zoom 会真正改变 layout box，水平滚动条才能正确计算滚动范围
+        zoom: scale,
+        display: 'inline-block',
+      }} />
     </div>
   );
-}
+});
+
+export default XlsxPreview;
