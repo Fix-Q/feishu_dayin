@@ -8,12 +8,13 @@ import ExcelJS from 'exceljs';
 // 打印时该 HTML table 直接放进 iframe 打印，天然支持。
 // ============================================================================
 
-const PX_PER_CHAR = 7;   // Excel 列宽单位≈字符数，粗略换算像素
+const PX_PER_CHAR = 8.5; // Excel 列宽单位≈字符数；按宋体/Calibri 11pt 较准
 const PX_PER_POINT = 96 / 72; // 行高 point → px
+const MIN_COL_PX = 60;   // 防止极窄列（空列宽）被挤成无法显示
 
 function colWidthToPx(w: number | undefined): number {
-  if (!w) return 64;
-  return Math.round(w * PX_PER_CHAR + 5);
+  if (!w || w <= 0) return MIN_COL_PX;
+  return Math.max(MIN_COL_PX, Math.round(w * PX_PER_CHAR + 8));
 }
 
 function rowHeightToPx(h: number | undefined): number {

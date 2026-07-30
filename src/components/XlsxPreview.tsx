@@ -92,9 +92,9 @@ export default function XlsxPreview({ blob, onError }: Props) {
           </div>
         )}
         <div ref={containerRef} style={{
-          transform: `scale(${scale})`,
-          transformOrigin: 'top center',
-          transition: 'transform 0.12s ease-out',
+          // CSS zoom 才会真正改变 layout box，水平滚动条才能正确计算滚动范围
+          // transform: scale 不会改变 layout，滚动条会按缩放前宽度算，位置会错位
+          zoom: scale,
           display: 'inline-block',
         }} />
       </div>
