@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ConfigProvider, Tabs, Spin, Alert, theme } from 'antd';
-import { PrinterOutlined, FolderOpenOutlined, TagsOutlined, FileTextOutlined } from '@ant-design/icons';
+import { ConfigProvider, Spin, Alert, theme } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import 'antd/dist/reset.css';
 
@@ -12,31 +11,35 @@ import TemplateManageTab from './components/TemplateManageTab';
 import TemplateEditorTab from './components/TemplateEditorTab';
 import VariablePanel from './components/VariablePanel';
 
-// 主题：飞书风格。蓝色主色、克制圆角、紧凑控件、浅色卡片，贴近多维表格原生观感。
 const THEME = {
   token: {
-    colorPrimary: '#3370FF',      // 飞书蓝
+    colorPrimary: '#3370FF',
     colorInfo: '#3370FF',
     borderRadius: 6,
-    colorBgLayout: '#f7f8fa',
-    colorBorderSecondary: '#eef0f3',
+    colorBgLayout: '#f5f6f7',
+    colorBorderSecondary: '#e5e6eb',
     fontSize: 13,
   },
   components: {
     Card: { headerFontSize: 14, paddingLG: 12 },
-    Tabs: { horizontalItemPadding: '8px 4px', titleFontSize: 14 },
     Segmented: { itemSelectedBg: '#3370FF', itemSelectedColor: '#fff' },
   },
 };
+
+const TABS = [
+  { key: 'print', label: '打印', icon: '🖨' },
+  { key: 'manage', label: '模板', icon: '📁' },
+  { key: 'edit', label: '编辑', icon: '✏️' },
+  { key: 'vars', label: '变量', icon: '🏷' },
+] as const;
 
 export default function App() {
   const active = useActiveRecord();
   const [templates, setTemplates] = useState<TemplateInfo[]>([]);
   const [matchConfig, setMatchConfig] = useState<MatchConfig>({ tables: {} });
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [activeKey, setActiveKey] = useState('print');
+  const [activeKey, setActiveKey] = useState<string>('print');
 
-  // 刷新当前表的模板列表（上传/删除/复制后、切表时调用）
   const refreshTemplates = useCallback(async () => {
     if (!active.tableId) {
       setTemplates([]);
@@ -56,11 +59,10 @@ export default function App() {
       const cfg = await getConfig();
       setMatchConfig(cfg);
     } catch (e) {
-      // 配置读取失败不阻塞界面，保留空配置
+      // 配置读取失败不阻塞界面
     }
   }, []);
 
-  // 切表时（tableId 变化）自动重新拉取该表的模板，实现按表隔离
   useEffect(() => {
     refreshTemplates();
   }, [refreshTemplates]);
@@ -69,107 +71,148 @@ export default function App() {
     refreshConfig();
   }, [refreshConfig]);
 
-  const items = [
-    {
-      key: 'print',
-      label: (<span><PrinterOutlined /> 打印</span>),
-      children: (
-        <PrintTab
-          active={active}
-          templates={templates}
-          matchConfig={matchConfig}
-          onNeedTemplates={refreshTemplates}
-          goManage={() => setActiveKey('manage')}
-        />
-      ),
-    },
-    {
-      key: 'manage',
-      label: (<span><FolderOpenOutlined /> 模板管理</span>),
-      children: (
-        <TemplateManageTab
-          active={active}
-          templates={templates}
-          matchConfig={matchConfig}
-          onTemplatesChanged={refreshTemplates}
-          onConfigChanged={(cfg) => setMatchConfig(cfg)}
-        />
-      ),
-    },
-    {
-      key: 'edit',
-      label: (<span><FileTextOutlined /> 模板编辑</span>),
-      children: (
-        <TemplateEditorTab
-          active={active}
-          templates={templates}
-          onTemplatesChanged={refreshTemplates}
-        />
-      ),
-    },
-    {
-      key: 'vars',
-      label: (<span><TagsOutlined /> 变量参考</span>),
-      children: <VariablePanel active={active} />,
-    },
-  ];
-
   return (
     <ConfigProvider locale={zhCN} theme={THEME}>
       <div
         style={{
           height: '100vh',
-          boxSizing: 'border-box',
           display: 'flex',
           flexDirection: 'column',
           background: THEME.token.colorBgLayout,
         }}
       >
-        {/* 顶部品牌条 */}
+        {/* ===== 顶部状态条 ===== */}
         <div
           style={{
-            display: 'flex', alignItems: 'center', gap: 8,
-            padding: '10px 16px', background: '#fff',
-            borderBottom: '1px solid #eef0f3', flexShrink: 0,
+            background: '#fff',
+            padding: '10px 16px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            borderBottom: '1px solid #e5e6eb',
+            flexShrink: 0,
           }}
         >
-          <span
+          <div
             style={{
-              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-              width: 24, height: 24, borderRadius: 6, background: '#3370FF', color: '#fff',
+              width: 8,
+              height: 8,
+              borderRadius: '50%',
+              background: active.recordId ? '#34c724' : '#ff8800',
+              flexShrink: 0,
+            }}
+          />
+          <div
+            style={{
+              fontSize: 13,
+              color: '#1f2329',
+              fontWeight: 500,
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              flex: 1,
             }}
           >
-            <PrinterOutlined style={{ fontSize: 14 }} />
-          </span>
-          <span style={{ fontWeight: 600, fontSize: 14, color: '#1f2329' }}>单据打印</span>
-          <span style={{ marginLeft: 'auto', fontSize: 12, color: '#8f959e' }}>
-            {active.tableName ? `表：${active.tableName}` : '未连接'}
-          </span>
+            {active.primaryText || '请在左侧表格中选中一条记录'}
+          </div>
+          <div style={{ fontSize: 12, color: '#8f959e', flexShrink: 0 }}>
+            {active.tableName || ''}
+          </div>
         </div>
 
-        <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
+        {/* ===== 内容区 ===== */}
+        <div
+          style={{
+            flex: 1,
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column',
+          }}
+        >
           {loadError && (
             <Alert
               type="warning"
               showIcon
-              style={{ marginBottom: 16, borderRadius: 8 }}
+              style={{ margin: 12, borderRadius: 8, flexShrink: 0 }}
               message={loadError}
               description="模板功能依赖本地 dev server 的 /api 接口，请确认服务已启动。"
             />
           )}
           {active.loading ? (
-            <div style={{ textAlign: 'center', paddingTop: 96 }}>
+            <div style={{ textAlign: 'center', paddingTop: 96, flex: 1 }}>
               <Spin size="large" />
-              <div style={{ marginTop: 16, color: '#8c8c8c', fontSize: 13 }}>正在连接多维表格…</div>
+              <div style={{ marginTop: 16, color: '#8c8c8c', fontSize: 13 }}>
+                正在连接多维表格…
+              </div>
             </div>
           ) : (
-            <Tabs
-              activeKey={activeKey}
-              onChange={setActiveKey}
-              items={items}
-              tabBarStyle={{ marginBottom: 16, fontWeight: 500 }}
-            />
+            <>
+              {activeKey === 'print' && (
+                <PrintTab
+                  active={active}
+                  templates={templates}
+                  matchConfig={matchConfig}
+                  onNeedTemplates={refreshTemplates}
+                  goManage={() => setActiveKey('manage')}
+                />
+              )}
+              {activeKey === 'manage' && (
+                <TemplateManageTab
+                  active={active}
+                  templates={templates}
+                  matchConfig={matchConfig}
+                  onTemplatesChanged={refreshTemplates}
+                  onConfigChanged={(cfg) => setMatchConfig(cfg)}
+                />
+              )}
+              {activeKey === 'edit' && (
+                <TemplateEditorTab
+                  active={active}
+                  templates={templates}
+                  onTemplatesChanged={refreshTemplates}
+                />
+              )}
+              {activeKey === 'vars' && <VariablePanel active={active} />}
+            </>
           )}
+        </div>
+
+        {/* ===== 底部 Tab 导航 ===== */}
+        <div
+          style={{
+            display: 'flex',
+            background: '#fff',
+            borderTop: '1px solid #e5e6eb',
+            flexShrink: 0,
+          }}
+        >
+          {TABS.map((t) => {
+            const on = activeKey === t.key;
+            return (
+              <div
+                key={t.key}
+                onClick={() => setActiveKey(t.key)}
+                style={{
+                  flex: 1,
+                  padding: '8px 0 10px',
+                  textAlign: 'center',
+                  fontSize: 11,
+                  color: on ? '#3370FF' : '#8f959e',
+                  fontWeight: on ? 600 : 400,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: 3,
+                  userSelect: 'none',
+                  transition: 'color .15s',
+                }}
+              >
+                <span style={{ fontSize: 18, lineHeight: 1 }}>{t.icon}</span>
+                {t.label}
+              </div>
+            );
+          })}
         </div>
       </div>
     </ConfigProvider>

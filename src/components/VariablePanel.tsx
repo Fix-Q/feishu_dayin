@@ -151,7 +151,7 @@ export default function VariablePanel({ active }: Props) {
   }));
 
   return (
-    <Space direction="vertical" size={12} style={{ width: '100%' }}>
+    <div style={{ flex: 1, overflow: 'auto', padding: 12, display: 'flex', flexDirection: 'column', gap: 12 }}>
       <Alert
         type="info"
         showIcon
@@ -219,6 +219,6 @@ export default function VariablePanel({ active }: Props) {
           />
         </Card>
       )}
-    </Space>
+    </div>
   );
 }

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Card, Segmented, Select, Space, Spin, Switch, Tag, Tooltip, Typography, message } from 'antd';
-import { PrinterOutlined, DownloadOutlined, ReloadOutlined, FileWordOutlined, RotateRightOutlined } from '@ant-design/icons';
+import { Alert, Button, Select, Spin, Tag, Tooltip, Typography, message } from 'antd';
+import { PrinterOutlined, DownloadOutlined, ReloadOutlined, RotateRightOutlined } from '@ant-design/icons';
 import { saveAs } from 'file-saver';
 
 import type { TemplateInfo, MatchConfig, MatchKind } from '../types';
@@ -32,13 +32,24 @@ const KIND_LABEL: Record<MatchKind, string> = {
   none: '',
 };
 
+const ORIENTATION_NEXT: Record<PrintOrientation, PrintOrientation> = {
+  auto: 'portrait',
+  portrait: 'landscape',
+  landscape: 'auto',
+};
+
+const ORIENTATION_LABEL: Record<PrintOrientation, string> = {
+  auto: '跟随',
+  portrait: '竖向',
+  landscape: '横向',
+};
+
 export default function PrintTab({ active, templates, matchConfig, onNeedTemplates, goManage }: Props) {
   const [selected, setSelected] = useState<string | null>(null);
   const [manual, setManual] = useState(false);
   const [matchKind, setMatchKind] = useState<MatchKind>('none');
   const [previewBlob, setPreviewBlob] = useState<Blob | null>(null);
   const [orientation, setOrientation] = useState<PrintOrientation>('auto');
-  // 多联打印：默认关闭（单份）；开启后按联名列表连打
   const [multiCopy, setMultiCopy] = useState(false);
   const DEFAULT_COPIES = ['生产部', '销售部', '客户', '财务部', '开票'];
   const [rendering, setRendering] = useState(false);
@@ -48,7 +59,6 @@ export default function PrintTab({ active, templates, matchConfig, onNeedTemplat
 
   const matchFieldId = active.tableId ? matchConfig.tables[active.tableId]?.matchFieldId : undefined;
 
-  // 自动匹配：读取匹配字段值 → 选模板。切记录时重置手动标记。
   const runAutoMatch = useCallback(async () => {
     if (!active.table || !active.recordId || !matchFieldId) {
       setMatchKind('none');
@@ -64,7 +74,6 @@ export default function PrintTab({ active, templates, matchConfig, onNeedTemplat
     }
   }, [active.table, active.recordId, matchFieldId, templates]);
 
-  // 切表后模板列表已换：若当前选中的模板不在新表模板里，清空选择，避免取到不存在的文件
   useEffect(() => {
     if (selected && !templates.some((t) => t.name === selected)) {
       setSelected(null);
@@ -73,7 +82,6 @@ export default function PrintTab({ active, templates, matchConfig, onNeedTemplat
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [templates]);
 
-  // 记录变化 → 重置手动标记并触发自动匹配（debounce 300ms）
   useEffect(() => {
     setManual(false);
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -86,7 +94,6 @@ export default function PrintTab({ active, templates, matchConfig, onNeedTemplat
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active.recordId, matchFieldId, templates]);
 
-  // 生成预览：取模板 → 构建数据 → 填充 → 出 Blob
   const generate = useCallback(async (): Promise<Blob | null> => {
     if (!selected) { message.warning('请先选择模板'); return null; }
     if (!active.table || !active.recordId) { message.warning('请先在表格中选中一条记录'); return null; }
@@ -112,7 +119,6 @@ export default function PrintTab({ active, templates, matchConfig, onNeedTemplat
     }
   }, [selected, active.tableId, active.table, active.recordId, active.tableName, active.fieldMetas]);
 
-  // 选中模板或记录变化后自动刷新预览
   useEffect(() => {
     if (selected && active.recordId) {
       generate();
@@ -164,24 +170,21 @@ export default function PrintTab({ active, templates, matchConfig, onNeedTemplat
   const noRecord = !active.recordId;
 
   return (
-    <Space direction="vertical" size={16} style={{ width: '100%' }}>
-      {active.error && <Alert type="error" showIcon message={`连接多维表格出错：${active.error}`} />}
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      {/* 可滚动内容区 */}
+      <div style={{ flex: 1, overflow: 'auto', padding: 12, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {active.error && (
+          <Alert type="error" showIcon message={`连接多维表格出错：${active.error}`} style={{ flexShrink: 0 }} />
+        )}
+        {noRecord && (
+          <Alert type="warning" showIcon message="请在左侧表格中选中一条记录" style={{ flexShrink: 0 }} />
+        )}
 
-      <Alert
-        type={noRecord ? 'warning' : 'success'}
-        showIcon
-        message={
-          noRecord
-            ? '请在左侧表格中选中一条记录'
-            : <span>当前记录：<Text strong>{active.primaryText || '(空)'}</Text>　·　表：{active.tableName}</span>
-        }
-      />
-
-      <Card size="small" title="选择模板" styles={{ body: { paddingBottom: 12 } }}>
-        <Space wrap>
+        {/* 模板选择行 */}
+        <div style={{ background: '#fff', borderRadius: 10, boxShadow: '0 1px 4px rgba(31,35,41,.06)', padding: 12, display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
           <Select
-            style={{ width: 280 }}
-            placeholder={templates.length ? '选择模板' : '暂无模板，请先在“模板管理”上传'}
+            style={{ flex: 1 }}
+            placeholder={templates.length ? '选择模板' : '暂无模板，请先在"模板管理"上传'}
             showSearch
             allowClear
             value={selected}
@@ -191,98 +194,119 @@ export default function PrintTab({ active, templates, matchConfig, onNeedTemplat
             notFoundContent={<a onClick={goManage}>去模板管理上传</a>}
           />
           {selected && !manual && matchKind !== 'none' && (
-            <Tag color="green">{KIND_LABEL[matchKind]}</Tag>
+            <Tag color="green" style={{ margin: 0 }}>{KIND_LABEL[matchKind]}</Tag>
           )}
-          {selected && manual && <Tag color="blue">手动选择</Tag>}
+          {selected && manual && <Tag color="blue" style={{ margin: 0 }}>手动选择</Tag>}
           {selected && !manual && matchKind === 'none' && matchFieldId && (
-            <Tag>未自动匹配</Tag>
+            <Tag style={{ margin: 0 }}>未自动匹配</Tag>
           )}
-        </Space>
-        {!matchFieldId && (
-          <div style={{ marginTop: 8 }}>
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              未设置自动匹配字段，<a onClick={goManage}>去设置</a>后可按记录自动选模板。
-            </Text>
-          </div>
+        </div>
+        {!matchFieldId && active.recordId && (
+          <Text type="secondary" style={{ fontSize: 12, lineHeight: 1.5 }}>
+            未设置自动匹配字段，<a onClick={goManage}>去设置</a>后可按记录自动选模板。
+          </Text>
         )}
-        <div style={{ marginTop: 14 }}>
-          <div style={{ marginBottom: 10 }}>
-            <Space size={8} align="center">
-              <Tooltip title="五联货单等横向内容，若 Word 是竖版排版导致打印被裁切，选「横向」会自动旋转 90° 并切换横版纸张">
-                <Text type="secondary" style={{ fontSize: 12 }}>
-                  <RotateRightOutlined /> 打印方向
-                </Text>
-              </Tooltip>
-              <Segmented
+
+        {/* 错误 / 警告 */}
+        {errors.length > 0 && (
+          <Alert
+            type="error"
+            showIcon
+            message="模板填充失败"
+            style={{ flexShrink: 0 }}
+            description={
+              <ul style={{ margin: 0, paddingLeft: 18 }}>
+                {errors.map((e, i) => <li key={i}>{e}</li>)}
+              </ul>
+            }
+          />
+        )}
+        {warnings.length > 0 && (
+          <Alert
+            type="warning"
+            showIcon
+            message="数据提示"
+            style={{ flexShrink: 0 }}
+            description={
+              <ul style={{ margin: 0, paddingLeft: 18 }}>
+                {warnings.map((w, i) => <li key={i}>{w}</li>)}
+              </ul>
+            }
+          />
+        )}
+
+        {/* 预览卡 */}
+        <div style={{ background: '#fff', borderRadius: 10, boxShadow: '0 1px 4px rgba(31,35,41,.06)', flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 200 }}>
+          {/* Toolbar */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px', borderBottom: '1px solid #e5e6eb', background: '#fafbfc', flexShrink: 0 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: '#1f2329', marginRight: 'auto' }}>打印预览</span>
+
+            <Tooltip title="刷新预览">
+              <Button
                 size="small"
-                value={orientation}
-                onChange={(v) => setOrientation(v as PrintOrientation)}
-                options={[
-                  { label: '跟随文档', value: 'auto' },
-                  { label: '竖向', value: 'portrait' },
-                  { label: '横向', value: 'landscape' },
-                ]}
+                icon={<ReloadOutlined />}
+                onClick={generate}
+                disabled={!selected || noRecord}
               />
-              <Tooltip title="开启后一次连打 5 份（生产部/销售部/客户/财务部/开票），每份右上角标注联名">
-                <Space size={4} align="center">
-                  <Switch size="small" checked={multiCopy} onChange={setMultiCopy} />
-                  <Text type="secondary" style={{ fontSize: 12 }}>多联(5联)</Text>
-                </Space>
-              </Tooltip>
-            </Space>
+            </Tooltip>
+
+            <div style={{ width: 1, height: 16, background: '#e5e6eb', margin: '0 4px' }} />
+
+            <Tooltip title="打印方向：五联货单等横向内容，若 Word 是竖版排版导致打印被裁切，选「横向」会自动旋转 90°">
+              <Button
+                size="small"
+                icon={<RotateRightOutlined />}
+                onClick={() => setOrientation((o) => ORIENTATION_NEXT[o])}
+              >
+                {ORIENTATION_LABEL[orientation]}
+              </Button>
+            </Tooltip>
+
+            <Tooltip title={multiCopy ? '一次连打 5 份（生产部/销售部/客户/财务部/开票）' : '单份打印'}>
+              <Button
+                size="small"
+                type={multiCopy ? 'primary' : 'default'}
+                onClick={() => setMultiCopy((v) => !v)}
+              >
+                {multiCopy ? '5联' : '单联'}
+              </Button>
+            </Tooltip>
+          </div>
+
+          {/* Preview body */}
+          <div style={{ flex: 1, background: '#eceef1', overflow: 'auto', display: 'flex', justifyContent: 'center', padding: 16 }}>
+            <Spin spinning={rendering} tip="正在生成预览…">
+              {isXlsx
+                ? <XlsxPreview blob={previewBlob} onError={(m) => setErrors([m])} />
+                : <DocxPreview blob={previewBlob} orientation={orientation} onError={(m) => setErrors([m])} />}
+            </Spin>
           </div>
         </div>
-      </Card>
+      </div>
 
-      {errors.length > 0 && (
-        <Alert
-          type="error"
-          showIcon
-          message="模板填充失败"
-          description={<ul style={{ margin: 0, paddingLeft: 18 }}>{errors.map((e, i) => <li key={i}>{e}</li>)}</ul>}
-        />
-      )}
-      {warnings.length > 0 && (
-        <Alert
-          type="warning"
-          showIcon
-          message="数据提示"
-          description={<ul style={{ margin: 0, paddingLeft: 18 }}>{warnings.map((w, i) => <li key={i}>{w}</li>)}</ul>}
-        />
-      )}
-
-      <Card
-        size="small"
-        title={<span><FileWordOutlined /> 打印预览</span>}
-        styles={{ body: { padding: 12 } }}
-      >
-        <Spin spinning={rendering} tip="正在生成预览…">
-          {isXlsx
-            ? <XlsxPreview blob={previewBlob} onError={(m) => setErrors([m])} />
-            : <DocxPreview blob={previewBlob} orientation={orientation} onError={(m) => setErrors([m])} />}
-        </Spin>
-      </Card>
-
-      {/* 底部固定操作栏：打印/下载常驻，不必滚到底 */}
-      <div
-        style={{
-          position: 'sticky', bottom: 0, margin: '4px -16px -16px',
-          padding: '10px 16px', background: '#fff',
-          borderTop: '1px solid #eef0f3',
-          display: 'flex', gap: 8, alignItems: 'center',
-          boxShadow: '0 -2px 8px rgba(0,0,0,0.03)',
-        }}
-      >
-        <Button type="primary" icon={<PrinterOutlined />} onClick={handlePrint} disabled={!selected || noRecord}>
-          {multiCopy ? '打印(5联)' : '打印'}
+      {/* 底部固定操作栏 */}
+      <div style={{ background: '#fff', borderTop: '1px solid #e5e6eb', padding: '10px 16px', display: 'flex', gap: 10, flexShrink: 0 }}>
+        <Button
+          type="primary"
+          style={{ flex: 1, height: 38, borderRadius: 8, fontSize: 14, fontWeight: 500 }}
+          onClick={handlePrint}
+          disabled={!selected || noRecord}
+        >
+          <PrinterOutlined /> {multiCopy ? '打印(5联)' : '打印'}
         </Button>
-        <Button icon={<DownloadOutlined />} onClick={handleDownload} disabled={!selected || noRecord}>
-          {isXlsx ? '下载 Excel' : '下载 Word'}
+        <Button
+          style={{ flex: 1, height: 38, borderRadius: 8, border: '1px solid #e5e6eb', fontSize: 14, fontWeight: 500 }}
+          onClick={handleDownload}
+          disabled={!selected || noRecord}
+        >
+          <DownloadOutlined /> 下载
         </Button>
-        <Button type="text" icon={<ReloadOutlined />} onClick={generate} disabled={!selected || noRecord} style={{ marginLeft: 'auto' }}>
-          刷新预览
+        <Button
+          style={{ width: 38, height: 38, borderRadius: 8, border: '1px solid #e5e6eb', padding: 0 }}
+        >
+          ⋯
         </Button>
       </div>
-    </Space>
+    </div>
   );
 }

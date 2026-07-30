@@ -1,14 +1,10 @@
 import React, { useMemo, useState } from 'react';
-import {
-  Card, Input, List, Button, Upload, Space, Tag, Popconfirm, Modal, message, Select, Typography, Empty,
-} from 'antd';
-import { UploadOutlined, DeleteOutlined, CopyOutlined, DownloadOutlined, FileWordOutlined, FileExcelOutlined } from '@ant-design/icons';
+import { Button, Input, Popconfirm, Modal, message, Select, Empty } from 'antd';
+import { UploadOutlined, DeleteOutlined, CopyOutlined, DownloadOutlined } from '@ant-design/icons';
 import type { UploadProps } from 'antd';
 import type { TemplateInfo, MatchConfig } from '../types';
 import type { ActiveRecordState } from '../hooks/useActiveRecord';
 import { uploadTemplate, deleteTemplate, copyTemplate, putConfig, templateDownloadUrl } from '../services/templateApi';
-
-const { Text } = Typography;
 
 interface Props {
   active: ActiveRecordState;
@@ -24,6 +20,15 @@ function formatSize(n: number): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
+function formatTime(ts: number): string {
+  const d = new Date(ts);
+  const now = new Date();
+  if (d.toDateString() === now.toDateString()) {
+    return `今天 ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
+  }
+  return `${d.getMonth() + 1}月${d.getDate()}日`;
+}
+
 export default function TemplateManageTab({
   active, templates, matchConfig, onTemplatesChanged, onConfigChanged,
 }: Props) {
@@ -31,6 +36,7 @@ export default function TemplateManageTab({
   const [copySource, setCopySource] = useState<string | null>(null);
   const [copyTarget, setCopyTarget] = useState('');
   const [savingConfig, setSavingConfig] = useState(false);
+  const [showMatchEdit, setShowMatchEdit] = useState(false);
 
   const filtered = useMemo(() => {
     const k = keyword.trim().toLowerCase();
@@ -42,9 +48,12 @@ export default function TemplateManageTab({
     ? matchConfig.tables[active.tableId]?.matchFieldId
     : undefined;
 
+  const currentMatchFieldName = active.fieldMetas.find(
+    (f) => f.id === currentMatchFieldId
+  )?.name;
+
   const tableId = active.tableId;
 
-  // 上传：customRequest 自行调用 API，处理 409 覆盖确认
   const doUpload = async (file: File, overwrite: boolean): Promise<boolean> => {
     if (!tableId) { message.error('未连接到数据表，无法上传'); return false; }
     const buf = await file.arrayBuffer();
@@ -83,17 +92,17 @@ export default function TemplateManageTab({
     beforeUpload: (file) => {
       if (!tableId) {
         message.error('未连接到数据表，无法上传');
-        return Upload.LIST_IGNORE;
+        return false; // Upload.LIST_IGNORE is not exported in all antd versions
       }
       if (!/\.(docx|xlsx)$/i.test(file.name)) {
         message.error('仅支持 .docx / .xlsx 文件');
-        return Upload.LIST_IGNORE;
+        return false;
       }
       if (file.size > 15 * 1024 * 1024) {
         message.warning('文件较大（>15MB），上传可能较慢');
       }
       doUpload(file, false);
-      return Upload.LIST_IGNORE; // 阻止 antd 默认上传
+      return false;
     },
   };
 
@@ -110,7 +119,6 @@ export default function TemplateManageTab({
 
   const openCopy = (name: string) => {
     setCopySource(name);
-    // 默认新名：原名 + " 副本"（保留原扩展名）
     const ext = /\.xlsx$/i.test(name) ? '.xlsx' : '.docx';
     const base = name.replace(/\.(docx|xlsx)$/i, '');
     setCopyTarget(`${base} 副本${ext}`);
@@ -152,6 +160,7 @@ export default function TemplateManageTab({
       const saved = await putConfig(next);
       onConfigChanged(saved);
       message.success('已保存自动匹配字段');
+      setShowMatchEdit(false);
     } catch (e: any) {
       message.error(e?.message || '保存失败');
     } finally {
@@ -160,12 +169,61 @@ export default function TemplateManageTab({
   };
 
   return (
-    <Space direction="vertical" size={12} style={{ width: '100%' }}>
-      <Card size="small" title="自动匹配设置">
-        <Text type="secondary" style={{ fontSize: 12 }}>
-          选择当前表「{active.tableName || '未连接'}」用于匹配模板的字段。打开插件时，会用该字段的值去匹配同名模板（文件名去掉 .docx）。
-        </Text>
-        <div style={{ marginTop: 8 }}>
+    <div style={{ flex: 1, overflow: 'auto', padding: 12, display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {/* 搜索行 + 上传 */}
+      <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+        <Input.Search
+          placeholder="搜索模板名称"
+          allowClear
+          value={keyword}
+          onChange={(e) => setKeyword(e.target.value)}
+          style={{ flex: 1 }}
+        />
+        <Button type="primary" icon={<UploadOutlined />} onClick={() => {
+          const input = document.createElement('input');
+          input.type = 'file';
+          input.accept = '.docx,.xlsx';
+          input.multiple = true;
+          input.onchange = (e) => {
+            const files = (e.target as HTMLInputElement).files;
+            if (!files) return;
+            for (const f of Array.from(files)) {
+              doUpload(f, false);
+            }
+          };
+          input.click();
+        }}>
+          ＋ 上传
+        </Button>
+      </div>
+
+      {/* 自动匹配提示 */}
+      <div
+        style={{
+          fontSize: 12,
+          color: '#646a73',
+          background: '#e8f0ff',
+          borderRadius: 8,
+          padding: '10px 12px',
+          display: 'flex',
+          gap: 8,
+          alignItems: 'flex-start',
+          lineHeight: 1.5,
+          flexShrink: 0,
+        }}
+      >
+        <span style={{ flexShrink: 0 }}>⚙️</span>
+        <span style={{ flex: 1 }}>
+          自动匹配字段：<b>{currentMatchFieldName || '未设置'}</b>
+          {' '}— 打开记录时自动按该字段值选择同名模板。
+          <a onClick={() => setShowMatchEdit((v) => !v)} style={{ color: '#3370FF', marginLeft: 4, cursor: 'pointer' }}>
+            {showMatchEdit ? '收起' : '修改'}
+          </a>
+        </span>
+      </div>
+
+      {showMatchEdit && (
+        <div style={{ flexShrink: 0 }}>
           <Select
             style={{ width: '100%' }}
             placeholder="选择匹配字段（可清空）"
@@ -178,69 +236,133 @@ export default function TemplateManageTab({
             optionFilterProp="label"
           />
         </div>
-      </Card>
+      )}
 
-      <Card
-        size="small"
-        title={`模板库（${templates.length}）`}
-        extra={
-          <Upload {...uploadProps}>
-            <Button type="primary" icon={<UploadOutlined />} size="small">上传模板</Button>
-          </Upload>
-        }
-      >
-        <Input.Search
-          placeholder="搜索模板名称"
-          allowClear
-          value={keyword}
-          onChange={(e) => setKeyword(e.target.value)}
-          style={{ marginBottom: 12 }}
-        />
-        {filtered.length === 0 ? (
-          <Empty description={keyword ? '无匹配模板' : '还没有模板，点右上角上传'} />
-        ) : (
-          <List
-            size="small"
-            dataSource={filtered}
-            renderItem={(t) => (
-              <List.Item
-                actions={[
-                  <a key="dl" href={tableId ? templateDownloadUrl(tableId, t.name) : undefined} download title="下载">
+      {/* 模板卡片列表 */}
+      {filtered.length === 0 ? (
+        <Empty description={keyword ? '无匹配模板' : '还没有模板，点右上角上传'} style={{ marginTop: 24 }} />
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {filtered.map((t) => {
+            const isExcel = /\.xlsx$/i.test(t.name);
+            return (
+              <div
+                key={t.name}
+                style={{
+                  background: '#fff',
+                  borderRadius: 10,
+                  padding: 12,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 12,
+                  boxShadow: '0 1px 4px rgba(31,35,41,.06)',
+                }}
+              >
+                {/* 类型图标 */}
+                <div
+                  style={{
+                    width: 38,
+                    height: 38,
+                    borderRadius: 8,
+                    background: isExcel ? '#dcffe4' : '#e8f0ff',
+                    color: isExcel ? '#1a7f37' : '#3370ff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: 18,
+                    fontWeight: 700,
+                    flexShrink: 0,
+                  }}
+                >
+                  {isExcel ? 'X' : 'W'}
+                </div>
+
+                {/* 元信息 */}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
+                    style={{
+                      fontSize: 13,
+                      fontWeight: 500,
+                      color: '#1f2329',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    }}
+                    title={t.name}
+                  >
+                    {t.name}
+                  </div>
+                  <div style={{ fontSize: 11, color: '#8f959e', marginTop: 2 }}>
+                    {isExcel ? 'Excel' : 'Word'} · {formatSize(t.size)} · {formatTime(t.mtime)}
+                  </div>
+                </div>
+
+                {/* 操作图标 */}
+                <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
+                  <a
+                    href={tableId ? templateDownloadUrl(tableId, t.name) : undefined}
+                    download
+                    title="下载"
+                    style={{
+                      width: 28,
+                      height: 28,
+                      borderRadius: 6,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#8f959e',
+                      fontSize: 14,
+                      cursor: 'pointer',
+                    }}
+                  >
                     <DownloadOutlined />
-                  </a>,
-                  <a key="cp" onClick={() => openCopy(t.name)} title="复制"><CopyOutlined /></a>,
+                  </a>
+                  <a
+                    onClick={() => openCopy(t.name)}
+                    title="复制"
+                    style={{
+                      width: 28,
+                      height: 28,
+                      borderRadius: 6,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#8f959e',
+                      fontSize: 14,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <CopyOutlined />
+                  </a>
                   <Popconfirm
-                    key="del"
                     title={`删除「${t.name}」？`}
                     okText="删除"
                     cancelText="取消"
                     onConfirm={() => handleDelete(t.name)}
                   >
-                    <a style={{ color: '#cf1322' }} title="删除"><DeleteOutlined /></a>
-                  </Popconfirm>,
-                ]}
-              >
-                <List.Item.Meta
-                  avatar={
-                    /\.xlsx$/i.test(t.name)
-                      ? <FileExcelOutlined style={{ fontSize: 20, color: '#1D7324' }} />
-                      : <FileWordOutlined style={{ fontSize: 20, color: '#2B579A' }} />
-                  }
-                  title={<Text ellipsis style={{ maxWidth: 200 }}>{t.name}</Text>}
-                  description={
-                    <Space size={6}>
-                      <Tag color={/\.xlsx$/i.test(t.name) ? 'green' : 'blue'} style={{ marginInlineEnd: 0 }}>
-                        {/\.xlsx$/i.test(t.name) ? 'Excel' : 'Word'}
-                      </Tag>
-                      <Text type="secondary" style={{ fontSize: 12 }}>{formatSize(t.size)}</Text>
-                    </Space>
-                  }
-                />
-              </List.Item>
-            )}
-          />
-        )}
-      </Card>
+                    <a
+                      title="删除"
+                      style={{
+                        width: 28,
+                        height: 28,
+                        borderRadius: 6,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: '#8f959e',
+                        fontSize: 14,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <DeleteOutlined />
+                    </a>
+                  </Popconfirm>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       <Modal
         open={!!copySource}
@@ -257,6 +379,6 @@ export default function TemplateManageTab({
           onPressEnter={handleCopy}
         />
       </Modal>
-    </Space>
+    </div>
   );
 }
