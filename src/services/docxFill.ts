@@ -139,13 +139,16 @@ export function fillTemplate(
 
   const zips = pages.map((chunk, i) => {
     const sums = computeSums(chunk, found.rule.sums);
+    const paddedChunk = chunk.concat(
+      Array.from({ length: Math.max(0, found.rule.size - chunk.length) }, () => ({} as LinkedRow))
+    );
     const upper: Record<string, string> = {};
     for (const [k, v] of Object.entries(sums)) {
       if (/金额|总价|金额合计|合计金额/.test(k)) upper[`${k}大写`] = amountToChinese(v);
     }
     const pageData: Record<string, PrintDataValue> = {
       ...data,
-      [found.rule.field]: chunk,
+      [found.rule.field]: paddedChunk,
       页码: i + 1,
       总页数: pages.length,
       ...sums,

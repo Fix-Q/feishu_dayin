@@ -1,4 +1,4 @@
-import ExcelJS from 'exceljs';
+import PizZip from 'pizzip';
 
 // ============================================================================
 // xlsx → 保真 HTML 表格渲染
@@ -89,7 +89,13 @@ function cellText(cell: any): string {
 
 // 读取 blob → 渲染成 HTML table 字符串
 export async function renderXlsxToHtml(blob: Blob): Promise<string> {
+  const excelModule: any = await import('exceljs');
+  const ExcelJS = excelModule.default || excelModule;
   const ab = await blob.arrayBuffer();
+  const zip = new PizZip(ab);
+  const sheetName = Object.keys(zip.files).find((name) => /^xl\/worksheets\/sheet\d+\.xml$/.test(name));
+  const sheetXml = sheetName ? zip.file(sheetName)?.asText() || '' : '';
+  const xmlBreaks = Array.from(sheetXml.matchAll(/<brk\b[^>]*\bid="(\d+)"[^>]*\/>/g), (m) => Number(m[1]));
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(ab);
   const ws = wb.worksheets[0];
@@ -108,12 +114,25 @@ export async function renderXlsxToHtml(blob: Blob): Promise<string> {
 
   const totalW = colWidths.slice(1).reduce((a, b) => a + b, 0);
 
-  let html = `<table style="border-collapse:collapse;table-layout:fixed;width:${totalW}px;background:#fff;font-family:'宋体',SimSun,sans-serif;">`;
-  html += '<colgroup>';
-  for (let c = 1; c <= colCount; c++) html += `<col style="width:${colWidths[c]}px"/>`;
-  html += '</colgroup>';
+  const breakRows = new Set<number>(xmlBreaks);
+  for (const br of (ws.model?.rowBreaks || [])) {
+    const id = typeof br === 'number' ? br : br.id;
+    if (Number.isFinite(id)) breakRows.add(Number(id));
+  }
+  const pageEnds = Array.from(breakRows).filter((r) => r > 0 && r < rowCount).sort((a, b) => a - b);
+  const ranges: Array<[number, number]> = [];
+  let start = 1;
+  for (const end of pageEnds) { ranges.push([start, end]); start = end + 1; }
+  ranges.push([start, rowCount]);
 
-  for (let r = 1; r <= rowCount; r++) {
+  let html = '';
+  for (let page = 0; page < ranges.length; page++) {
+    const [from, to] = ranges[page];
+    html += `<table style="border-collapse:collapse;table-layout:fixed;width:${totalW}px;background:#fff;font-family:'宋体',SimSun,sans-serif;${page < ranges.length - 1 ? 'break-after:page;' : ''}">`;
+    html += '<colgroup>';
+    for (let c = 1; c <= colCount; c++) html += `<col style="width:${colWidths[c]}px"/>`;
+    html += '</colgroup>';
+    for (let r = from; r <= to; r++) {
     const rowObj = ws.getRow(r);
     const h = rowHeightToPx(rowObj?.height);
     html += `<tr style="height:${h}px">`;
@@ -159,8 +178,9 @@ export async function renderXlsxToHtml(blob: Blob): Promise<string> {
 
       html += `<td ${attrs.join(' ')} style="${styles.join(';')}">${esc(cellText(cell))}</td>`;
     }
-    html += '</tr>';
+      html += '</tr>';
+    }
+    html += '</table>';
   }
-  html += '</table>';
   return html;
 }

@@ -3,6 +3,7 @@ import type { PrintDataValue, LinkedRow } from '../types';
 import { amountToChinese } from './money';
 
 const MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+const DETAIL_ROWS_PER_PAGE = 5;
 
 // ============================================================================
 // 轻量 xlsx 模板填充引擎
@@ -143,18 +144,64 @@ function computeAutoSums(rows: LinkedRow[]): Record<string, string> {
   };
 }
 
-// 平移合并单元格：循环行克隆后，原本在 loopRow 之下的所有行都下移 delta 行。
-// 合并区间形如 "B11:J11"、"A10:E10"；对行号 >= loopRow+1 的端点整体 +delta。
-function shiftMergeCells(sheetXml: string, loopRow: number, delta: number): string {
-  if (delta === 0) return sheetXml;
-  return sheetXml.replace(/ref="([A-Z]+)(\d+):([A-Z]+)(\d+)"/g, (all, c1, r1, c2, r2) => {
-    const nr1 = parseInt(r1, 10);
-    const nr2 = parseInt(r2, 10);
-    if (nr1 > loopRow) {
-      return `ref="${c1}${nr1 + delta}:${c2}${nr2 + delta}"`;
+function pageCapacity(rows: RowInfo[], loopRow: number): number {
+  const footer = rows.find((r) => r.r > loopRow && /\{(?:合计数量|合计金额)\}|合计/.test(r.xml));
+  return Math.max(1, (footer ? footer.r : loopRow + 5) - loopRow);
+}
+
+function shiftRowXml(rowXml: string, offset: number): string {
+  if (!offset) return rowXml;
+  return rowXml.replace(/(<row r=")(\d+)/, (_a, p, r) => `${p}${parseInt(r, 10) + offset}`)
+    .replace(/(<c r="[A-Z]+)(\d+)(")/g, (_a, p, r, s) => `${p}${parseInt(r, 10) + offset}${s}`);
+}
+
+function repeatPageMerges(
+  sheetXml: string,
+  loopRow: number,
+  templateCapacity: number,
+  targetCapacity: number,
+  pageCount: number,
+  pageHeight: number
+): string {
+  return sheetXml.replace(/<mergeCells\b([^>]*)>([\s\S]*?)<\/mergeCells>/, (_all, attrs, inner) => {
+    const base: Array<{ c1: string; r1: number; c2: string; r2: number }> = [];
+    inner.replace(/<mergeCell\b[^>]*ref="([A-Z]+)(\d+):([A-Z]+)(\d+)"[^>]*\/>/g,
+      (_m: string, c1: string, r1: string, c2: string, r2: string) => { base.push({ c1, r1: +r1, c2, r2: +r2 }); return _m; });
+    const refs = new Set<string>();
+    const footerRow = loopRow + templateCapacity;
+    const detailDelta = targetCapacity - templateCapacity;
+    for (let p = 0; p < pageCount; p++) {
+      const off = p * pageHeight;
+      for (const m of base) {
+        if (m.r1 === loopRow && m.r2 === loopRow) {
+          for (let i = 0; i < targetCapacity; i++) refs.add(`${m.c1}${loopRow + off + i}:${m.c2}${loopRow + off + i}`);
+        } else if (m.r1 >= loopRow && m.r2 < footerRow) {
+          continue;
+        } else {
+          const r1 = m.r1 >= footerRow ? m.r1 + detailDelta : m.r1;
+          const r2 = m.r2 >= footerRow ? m.r2 + detailDelta : m.r2;
+          refs.add(`${m.c1}${r1 + off}:${m.c2}${r2 + off}`);
+        }
+      }
     }
-    return all;
+    const list = Array.from(refs);
+    const nextAttrs = /\bcount="\d+"/.test(attrs) ? attrs.replace(/\bcount="\d+"/, `count="${list.length}"`) : `${attrs} count="${list.length}"`;
+    return `<mergeCells${nextAttrs}>${list.map((ref) => `<mergeCell ref="${ref}"/>`).join('')}</mergeCells>`;
   });
+}
+
+function setDimension(sheetXml: string, endCol: string, endRow: number): string {
+  return sheetXml.replace(/<dimension\b[^>]*ref="[A-Z]+\d+:[A-Z]+\d+"[^>]*\/>/, `<dimension ref="A1:${endCol}${endRow}"/>`);
+}
+
+function setRowBreaks(sheetXml: string, breaks: number[]): string {
+  const withoutBreaks = sheetXml.replace(/<rowBreaks[\s\S]*?<\/rowBreaks>/, '');
+  if (!breaks.length) return withoutBreaks;
+  const xml = `<rowBreaks count="${breaks.length}" manualBreakCount="${breaks.length}">${breaks.map((r) => `<brk id="${r}" max="16383" man="1"/>`).join('')}</rowBreaks>`;
+  return withoutBreaks.replace(
+    /(<(?:customProperties|cellWatches|ignoredErrors|smartTags|drawing|legacyDrawing|legacyDrawingHF|picture|oleObjects|controls|webPublishItems|tableParts|extLst)\b|<\/worksheet>)/,
+    `${xml}$1`
+  );
 }
 
 // 用数据填充 xlsx 模板，返回填充后的 Blob（下载/预览三用）。
@@ -176,7 +223,6 @@ export function fillXlsx(
 
   // 2) 处理明细循环
   const loopField = findLoopField(sheetXml);
-  let delta = 0;
   let loopRowNum = 0;
   if (loopField) {
     const rows: LinkedRow[] = Array.isArray(data[loopField]) ? (data[loopField] as LinkedRow[]) : [];
@@ -189,22 +235,39 @@ export function fillXlsx(
         loopRowNum = loopRow.r;
         const dataRows = rows.length > 0 ? rows : [];
         const n = dataRows.length;
-        delta = Math.max(0, n - 1); // 原本占 1 行，n 行则新增 n-1 行
-        // 生成填充后的循环行组
-        const cloned = (n === 0 ? [{} as LinkedRow] : dataRows).map((row, i) => {
-          const nr = loopRow.r + i;
-          const filled = fillLoopRow(loopRow.xml, row);
-          return renumberRow(filled, loopRow.r, nr);
-        }).join('');
-        // 循环行之后的行整体下移 delta，并重新编号
-        const after = allRows.filter((r) => r.r > loopRow.r)
-          .map((r) => renumberRow(r.xml, r.r, r.r + delta)).join('');
-        const before = allRows.filter((r) => r.r < loopRow.r).map((r) => r.xml).join('');
-        const newSheetData = before + cloned + after;
-        sheetXml = sheetXml.replace(/<sheetData>[\s\S]*?<\/sheetData>/, `<sheetData>${newSheetData}</sheetData>`);
-        // 合并单元格随之下移
-        sheetXml = shiftMergeCells(sheetXml, loopRowNum, delta);
-        // 注入自动求和（若调用方未提供）
+        const templateCapacity = pageCapacity(allRows, loopRow.r);
+        const detailDelta = DETAIL_ROWS_PER_PAGE - templateCapacity;
+        const pageHeight = allRows[allRows.length - 1].r + detailDelta;
+        const pageCount = Math.max(1, Math.ceil(n / DETAIL_ROWS_PER_PAGE));
+        const before = allRows.filter((r) => r.r < loopRow.r);
+        const after = allRows.filter((r) => r.r >= loopRow.r + templateCapacity);
+        const pages: string[] = [];
+        for (let p = 0; p < pageCount; p++) {
+          const chunk = dataRows.slice(p * DETAIL_ROWS_PER_PAGE, (p + 1) * DETAIL_ROWS_PER_PAGE);
+          const pageRows: string[] = [];
+          for (let i = 0; i < DETAIL_ROWS_PER_PAGE; i++) {
+            pageRows.push(renumberRow(fillLoopRow(loopRow.xml, chunk[i] || {}), loopRow.r, loopRow.r + i));
+          }
+          const pageAfter = after.map((r) => renumberRow(r.xml, r.r, r.r + detailDelta));
+          const pageSums = computeAutoSums(chunk);
+          const pageData: Record<string, PrintDataValue> = {
+            ...data,
+            ...pageSums,
+            合计金额大写: amountToChinese(pageSums.合计金额),
+            金额大写: amountToChinese(pageSums.合计金额),
+          };
+          const pageXml = [...before.map((r) => r.xml), ...pageRows, ...pageAfter]
+            .map((xml) => shiftRowXml(xml, p * pageHeight)).join('');
+          pages.push(fillScalars(pageXml, pageData));
+        }
+        sheetXml = sheetXml.replace(/<sheetData>[\s\S]*?<\/sheetData>/, `<sheetData>${pages.join('')}</sheetData>`);
+        sheetXml = repeatPageMerges(
+          sheetXml, loopRowNum, templateCapacity, DETAIL_ROWS_PER_PAGE, pageCount, pageHeight
+        );
+        const dimension = sheetXml.match(/<dimension\b[^>]*ref="[A-Z]+\d+:([A-Z]+)\d+"/);
+        sheetXml = setDimension(sheetXml, dimension?.[1] || 'J', pageHeight * pageCount);
+        sheetXml = setRowBreaks(sheetXml, Array.from({ length: pageCount - 1 }, (_, i) => pageHeight * (i + 1)));
+
         const sums = computeAutoSums(dataRows);
         for (const [k, v] of Object.entries(sums)) {
           if (data[k] == null) data[k] = v;

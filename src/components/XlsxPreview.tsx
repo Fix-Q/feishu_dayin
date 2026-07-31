@@ -49,7 +49,7 @@ const XlsxPreview = forwardRef<PreviewHandle, Props>(function XlsxPreview(
       }
     })();
     return () => { cancelled = true; };
-  }, [blob, onError, fitWidth]);
+  }, [blob, fitWidth, onError]);
 
   const onWheel = useCallback((e: React.WheelEvent) => {
     if (!(e.ctrlKey || e.metaKey)) return;

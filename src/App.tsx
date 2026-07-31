@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ConfigProvider, Spin, Alert, theme } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import 'antd/dist/reset.css';
@@ -10,6 +10,7 @@ import PrintTab from './components/PrintTab';
 import TemplateManageTab from './components/TemplateManageTab';
 import TemplateEditorTab from './components/TemplateEditorTab';
 import VariablePanel from './components/VariablePanel';
+import { createRequestGate } from './services/requestGate';
 
 const THEME = {
   token: {
@@ -39,17 +40,24 @@ export default function App() {
   const [matchConfig, setMatchConfig] = useState<MatchConfig>({ tables: {} });
   const [loadError, setLoadError] = useState<string | null>(null);
   const [activeKey, setActiveKey] = useState<string>('print');
+  const templateLoadGateRef = useRef(createRequestGate());
+  const activeTableIdRef = useRef(active.tableId);
+  activeTableIdRef.current = active.tableId;
 
   const refreshTemplates = useCallback(async () => {
-    if (!active.tableId) {
+    const tableId = active.tableId;
+    const ticket = templateLoadGateRef.current.start();
+    if (!tableId) {
       setTemplates([]);
       return;
     }
     try {
-      const list = await listTemplates(active.tableId);
+      const list = await listTemplates(tableId);
+      if (!ticket.isCurrent() || activeTableIdRef.current !== tableId) return;
       setTemplates(list);
       setLoadError(null);
     } catch (e: any) {
+      if (!ticket.isCurrent() || activeTableIdRef.current !== tableId) return;
       setLoadError('无法连接本地模板服务：' + (e?.message || e));
     }
   }, [active.tableId]);
@@ -64,8 +72,11 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    templateLoadGateRef.current.invalidate();
+    setTemplates([]);
     refreshTemplates();
-  }, [refreshTemplates]);
+    return () => templateLoadGateRef.current.invalidate();
+  }, [active.tableId, refreshTemplates]);
 
   useEffect(() => {
     refreshConfig();

@@ -12,7 +12,9 @@ import { fetchTemplateBuffer } from '../services/templateApi';
 import { buildPrintData } from '../services/dataBuilder';
 import { fillTemplate, explainDocxError } from '../services/docxFill';
 import { fillXlsx, isXlsxName } from '../services/xlsxFill';
-import { matchTemplate } from '../services/templateMatch';
+import { resolveAutoSelection } from '../services/templateMatch';
+import { createRequestGate } from '../services/requestGate';
+import { currentPreviewBlob } from '../services/previewBlob';
 import { printDocxBlob, printHtmlTable, printCopies, type PrintOrientation } from '../utils/print';
 import { renderXlsxToHtml } from '../services/xlsxRender';
 import DocxPreview, {
@@ -54,6 +56,7 @@ export default function PrintTab({ active, templates, matchConfig, onNeedTemplat
   const [manual, setManual] = useState(false);
   const [matchKind, setMatchKind] = useState<MatchKind>('none');
   const [previewBlob, setPreviewBlob] = useState<Blob | null>(null);
+  const [previewTemplateName, setPreviewTemplateName] = useState<string | null>(null);
   const [orientation, setOrientation] = useState<PrintOrientation>('auto');
   const [multiCopy, setMultiCopy] = useState(false);
   const DEFAULT_COPIES = ['生产部', '销售部', '客户', '财务部', '开票'];
@@ -63,8 +66,26 @@ export default function PrintTab({ active, templates, matchConfig, onNeedTemplat
   const [scale, setScale] = useState(1);
   const previewRef = useRef<PreviewHandle>(null);
   const debounceRef = useRef<any>(null);
+  const autoMatchGateRef = useRef(createRequestGate());
+  const generationGateRef = useRef(createRequestGate());
+
+  const autoMatchContext = [
+    active.tableId || '', active.recordId || '', matchConfig.tables[active.tableId || '']?.matchFieldId || '',
+    templates.map((t) => `${t.name}:${t.mtime}`).join('|'),
+  ].join('\u0000');
+  const autoMatchContextRef = useRef(autoMatchContext);
+  autoMatchContextRef.current = autoMatchContext;
+
+  const generationContext = [active.tableId || '', active.recordId || '', selected || ''].join('\u0000');
+  const generationContextRef = useRef(generationContext);
+  generationContextRef.current = generationContext;
+  const safePreviewBlob = currentPreviewBlob(
+    previewBlob && previewTemplateName ? { blob: previewBlob, templateName: previewTemplateName } : null,
+    selected
+  );
 
   const handleScaleChange = useCallback((s: number) => setScale(clampScale(s)), []);
+  const handlePreviewError = useCallback((m: string) => setErrors([m]), []);
   const zoomIn = () => setScale((s) => clampScale(s + SCALE_STEP));
   const zoomOut = () => setScale((s) => clampScale(s - SCALE_STEP));
   const fitWidth = () => previewRef.current?.fitWidth();
@@ -72,17 +93,24 @@ export default function PrintTab({ active, templates, matchConfig, onNeedTemplat
   const matchFieldId = active.tableId ? matchConfig.tables[active.tableId]?.matchFieldId : undefined;
 
   const runAutoMatch = useCallback(async () => {
+    const ticket = autoMatchGateRef.current.start();
+    const context = autoMatchContextRef.current;
     if (!active.table || !active.recordId || !matchFieldId) {
+      if (!ticket.isCurrent() || autoMatchContextRef.current !== context) return;
       setMatchKind('none');
+      setSelected(null);
       return;
     }
     try {
       const value = await active.table.getCellString(matchFieldId, active.recordId);
-      const res = matchTemplate(value, templates);
+      if (!ticket.isCurrent() || autoMatchContextRef.current !== context) return;
+      const res = resolveAutoSelection(value, templates);
       setMatchKind(res.kind);
-      if (res.name) setSelected(res.name);
+      setSelected(res.name);
     } catch (e) {
+      if (!ticket.isCurrent() || autoMatchContextRef.current !== context) return;
       setMatchKind('none');
+      setSelected(null);
     }
   }, [active.table, active.recordId, matchFieldId, templates]);
 
@@ -95,21 +123,30 @@ export default function PrintTab({ active, templates, matchConfig, onNeedTemplat
   }, [templates]);
 
   useEffect(() => {
+    autoMatchGateRef.current.invalidate();
+    generationGateRef.current.invalidate();
     setManual(false);
+    setSelected(null);
+    setPreviewBlob(null);
+    setRendering(false);
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       runAutoMatch();
     }, 300);
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
+      autoMatchGateRef.current.invalidate();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active.recordId, matchFieldId, templates]);
+  }, [active.tableId, active.recordId, matchFieldId, templates]);
 
   const generate = useCallback(async (): Promise<Blob | null> => {
     if (!selected) { message.warning('请先选择模板'); return null; }
     if (!active.table || !active.recordId) { message.warning('请先在表格中选中一条记录'); return null; }
     if (!active.tableId) { message.warning('未获取到当前数据表'); return null; }
+    const ticket = generationGateRef.current.start();
+    const context = generationContextRef.current;
+    const isCurrent = () => ticket.isCurrent() && generationContextRef.current === context;
     setRendering(true);
     setErrors([]);
     setWarnings([]);
@@ -118,32 +155,38 @@ export default function PrintTab({ active, templates, matchConfig, onNeedTemplat
       const { data, warnings: w } = await buildPrintData(
         active.table, active.tableName, active.fieldMetas, active.recordId
       );
-      setWarnings(w);
       const blob = isXlsxName(selected) ? fillXlsx(buffer, data) : fillTemplate(buffer, data);
+      if (!isCurrent()) return null;
+      setWarnings(w);
       setPreviewBlob(blob);
+      setPreviewTemplateName(selected);
       return blob;
     } catch (e: any) {
+      if (!isCurrent()) return null;
       setPreviewBlob(null);
       setErrors(explainDocxError(e));
       return null;
     } finally {
-      setRendering(false);
+      if (isCurrent()) setRendering(false);
     }
   }, [selected, active.tableId, active.table, active.recordId, active.tableName, active.fieldMetas]);
 
   useEffect(() => {
+    generationGateRef.current.invalidate();
     if (selected && active.recordId) {
       generate();
     } else {
       setPreviewBlob(null);
+      setRendering(false);
     }
+    return () => generationGateRef.current.invalidate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected, active.recordId]);
+  }, [active.tableId, selected, active.recordId]);
 
   const isXlsx = !!selected && isXlsxName(selected);
 
   const handlePrint = async () => {
-    const blob = previewBlob || (await generate());
+    const blob = safePreviewBlob || (await generate());
     if (!blob) return;
     try {
       if (multiCopy) {
@@ -166,7 +209,7 @@ export default function PrintTab({ active, templates, matchConfig, onNeedTemplat
   };
 
   const handleDownload = async () => {
-    const blob = previewBlob || (await generate());
+    const blob = safePreviewBlob || (await generate());
     if (!blob) return;
     const ext = isXlsx ? '.xlsx' : '.docx';
     const base = selected ? selected.replace(/\.(docx|xlsx)$/i, '') : '打印';
@@ -200,7 +243,13 @@ export default function PrintTab({ active, templates, matchConfig, onNeedTemplat
             showSearch
             allowClear
             value={selected}
-            onChange={(v) => { setSelected(v ?? null); setManual(true); }}
+            onChange={(v) => {
+              if (debounceRef.current) clearTimeout(debounceRef.current);
+              autoMatchGateRef.current.invalidate();
+              setSelected(v ?? null);
+              setManual(!!v);
+              setMatchKind('none');
+            }}
             options={templateOptions}
             optionFilterProp="label"
             notFoundContent={<a onClick={goManage}>去模板管理上传</a>}
@@ -250,26 +299,26 @@ export default function PrintTab({ active, templates, matchConfig, onNeedTemplat
         {/* 预览卡 */}
         <div style={{ background: '#fff', borderRadius: 10, boxShadow: '0 1px 4px rgba(31,35,41,.06)', flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 200 }}>
           {/* Toolbar */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px', borderBottom: '1px solid #e5e6eb', background: '#fafbfc', flexShrink: 0 }}>
-            <span style={{ fontSize: 13, fontWeight: 600, color: '#1f2329', marginRight: 'auto' }}>打印预览</span>
+          <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6, padding: '8px 12px', borderBottom: '1px solid #e5e6eb', background: '#fafbfc', flexShrink: 0 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: '#1f2329', marginRight: 'auto', whiteSpace: 'nowrap', flexShrink: 0 }}>打印预览</span>
 
             {/* 缩放控件：放在预览面板外，不会被 zoom 影响 */}
             <Space size={2}>
               <Tooltip title="缩小 (Ctrl+滚轮)">
-                <Button size="small" icon={<ZoomOutOutlined />} onClick={zoomOut} disabled={!previewBlob || scale <= MIN_SCALE} />
+                <Button size="small" icon={<ZoomOutOutlined />} onClick={zoomOut} disabled={!safePreviewBlob || scale <= MIN_SCALE} />
               </Tooltip>
               <Tooltip title="放大 (Ctrl+滚轮)">
-                <Button size="small" icon={<ZoomInOutlined />} onClick={zoomIn} disabled={!previewBlob || scale >= MAX_SCALE} />
+                <Button size="small" icon={<ZoomInOutlined />} onClick={zoomIn} disabled={!safePreviewBlob || scale >= MAX_SCALE} />
               </Tooltip>
               <Tooltip title="适应宽度">
-                <Button size="small" icon={<ColumnWidthOutlined />} onClick={fitWidth} disabled={!previewBlob} />
+                <Button size="small" icon={<ColumnWidthOutlined />} onClick={fitWidth} disabled={!safePreviewBlob} />
               </Tooltip>
             </Space>
             <div style={{ width: 90 }}>
               <Slider
                 min={MIN_SCALE} max={MAX_SCALE} step={SCALE_STEP}
                 value={scale} onChange={(v) => setScale(clampScale(v as number))}
-                disabled={!previewBlob} tooltip={{ open: false }}
+                disabled={!safePreviewBlob} tooltip={{ open: false }}
               />
             </div>
             <span style={{ fontSize: 12, color: '#6b7280', minWidth: 38, textAlign: 'right' }}>{Math.round(scale * 100)}%</span>
@@ -312,8 +361,8 @@ export default function PrintTab({ active, templates, matchConfig, onNeedTemplat
           <div style={{ flex: 1, background: '#eceef1', overflow: 'hidden', padding: 16, display: 'flex' }}>
             <Spin spinning={rendering} tip="正在生成预览…" wrapperClassName="preview-spin" style={{ width: '100%' }}>
               {isXlsx
-                ? <XlsxPreview ref={previewRef} blob={previewBlob} scale={scale} onScaleChange={handleScaleChange} onError={(m) => setErrors([m])} />
-                : <DocxPreview ref={previewRef} blob={previewBlob} orientation={orientation} scale={scale} onScaleChange={handleScaleChange} onError={(m) => setErrors([m])} />}
+                ? <XlsxPreview ref={previewRef} blob={safePreviewBlob} scale={scale} onScaleChange={handleScaleChange} onError={handlePreviewError} />
+                : <DocxPreview ref={previewRef} blob={safePreviewBlob} orientation={orientation} scale={scale} onScaleChange={handleScaleChange} onError={handlePreviewError} />}
             </Spin>
           </div>
         </div>
@@ -335,11 +384,6 @@ export default function PrintTab({ active, templates, matchConfig, onNeedTemplat
           disabled={!selected || noRecord}
         >
           <DownloadOutlined /> 下载
-        </Button>
-        <Button
-          style={{ width: 38, height: 38, borderRadius: 8, border: '1px solid #e5e6eb', padding: 0 }}
-        >
-          ⋯
         </Button>
       </div>
     </div>

@@ -1,8 +1,8 @@
 import type { TemplateInfo, MatchResult } from '../types';
 
-// 去掉 .docx 后缀
+// 去掉 Office 模板后缀
 function baseName(name: string): string {
-  return name.replace(/\.docx$/i, '');
+  return name.replace(/\.(docx|xlsx)$/i, '');
 }
 
 // 根据匹配字段的值，在模板列表中挑选最合适的模板。
@@ -32,4 +32,9 @@ export function matchTemplate(value: string, templates: TemplateInfo[]): MatchRe
   if (reverse.length > 0) return { name: reverse[0].name, kind: 'reverse' };
 
   return { name: null, kind: 'none' };
+}
+
+// 自动匹配的选中状态始终以本次结果为准；无匹配时返回 null 以清掉旧模板。
+export function resolveAutoSelection(value: string, templates: TemplateInfo[]): MatchResult {
+  return matchTemplate(value, templates);
 }

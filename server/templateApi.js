@@ -20,12 +20,7 @@ function ensureStore() {
 // 禁止路径成分与下划线开头（下划线前缀留给 _config.json / _legacy 等保留项）。
 function safeTableId(raw) {
   if (typeof raw !== 'string' || !raw) throw httpError(400, '缺少数据表标识');
-  let id;
-  try {
-    id = decodeURIComponent(raw);
-  } catch (e) {
-    throw httpError(400, '数据表标识编码错误');
-  }
+  const id = raw; // Express 已解码 query 参数，不可再次 decodeURIComponent。
   if (!/^[A-Za-z0-9-]{1,64}$/.test(id)) throw httpError(400, '数据表标识非法');
   return id;
 }
@@ -41,12 +36,7 @@ function tableDir(tableId) {
 // 返回合法 basename，或抛出带 status 的错误。
 function safeName(raw) {
   if (typeof raw !== 'string' || !raw) throw httpError(400, '缺少文件名');
-  let name;
-  try {
-    name = decodeURIComponent(raw);
-  } catch (e) {
-    throw httpError(400, '文件名编码错误');
-  }
+  let name = raw; // Express 已解码 query/route 参数，二次解码会破坏含 % 的合法文件名。
   // 显式拒绝含路径成分的输入（不静默改名，避免 a/b.docx 悄悄变 b.docx 或路径穿越尝试）
   if (name.includes('/') || name.includes('\\') || name.includes('\0')) {
     throw httpError(400, '文件名不能含路径分隔符');

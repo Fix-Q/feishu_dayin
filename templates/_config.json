@@ -15,6 +15,10 @@
     "tbldeXFrTixlf6sB": {
       "matchFieldId": "fldMTsn4vk",
       "matchFieldName": "COA模板名称"
+    },
+    "tblR4JPa9dyagRA6": {
+      "matchFieldId": "fldx8HmQlU",
+      "matchFieldName": "发货公司"
     }
   }
 }
